@@ -1,0 +1,210 @@
+{
+  "random_seed": 20260325,
+  "document": {
+    "output_dir": "./outputs/utility-billing-2026",
+    "pdf_filename": "district_heating_billing_2026_scanned_style_readable.pdf",
+    "background_dirname": "_page_backgrounds_v2",
+    "title": "District Heating Billing Statement",
+    "subject": "Purchased Heat billing statements"
+  },
+  "financial_period": {
+    "label": "Financial Year 2026",
+    "start_date": "2026-01-01",
+    "end_date": "2026-12-31"
+  },
+  "companies": [
+    {
+      "label": "Toyota Financial Services UK",
+      "supplier": "Albion District Energy Services",
+      "supplier_code": "ADES",
+      "supplier_address": [
+        "Meridian Utilities House",
+        "41 Station Approach",
+        "Reading RG1 1LX",
+        "United Kingdom"
+      ],
+      "customer": "Toyota Financial Services UK",
+      "customer_code": "TFSUK",
+      "sites": [
+        {
+          "label": "Redhill HQ",
+          "customer_address": [
+            "Great Burgh, Burgh Heath",
+            "Epsom Road",
+            "Redhill RH1 5UZ",
+            "United Kingdom"
+          ],
+          "city": "Redhill",
+          "postcode": "RH1 5UZ",
+          "meter_id": "ADES-RHL-HT-90533",
+          "capacity_kw": 265,
+          "capacity_rate": "6.15",
+          "base_consumption": 28100,
+          "unit_price_base": "0.079",
+          "start_reading": 915860,
+          "billing_periods": [
+            { "year": 2026, "month": 1 },
+            { "year": 2026, "month": 2 },
+            { "year": 2026, "month": 3 },
+            { "year": 2026, "month": 4 },
+            { "year": 2026, "month": 5 },
+            { "year": 2026, "month": 6 }
+          ]
+        },
+        {
+          "label": "Manchester Office",
+          "customer_address": [
+            "5 New Bailey Square",
+            "Stanley Street",
+            "Salford M3 5JL",
+            "United Kingdom"
+          ],
+          "city": "Manchester",
+          "postcode": "M3 5JL",
+          "meter_id": "ADES-MAN-HT-90534",
+          "capacity_kw": 180,
+          "capacity_rate": "5.95",
+          "base_consumption": 19400,
+          "unit_price_base": "0.074",
+          "start_reading": 624180,
+          "billing_periods": [
+            { "year": 2026, "month": 7 },
+            { "year": 2026, "month": 8 },
+            { "year": 2026, "month": 9 },
+            { "year": 2026, "month": 10 },
+            { "year": 2026, "month": 11 },
+            { "year": 2026, "month": 12 }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Toyota Financial Services Belgium",
+      "supplier": "Benelux Thermal Grid NV",
+      "supplier_code": "BTG",
+      "supplier_address": [
+        "Canal Logistics Campus",
+        "27 Havenlaan",
+        "1000 Brussels",
+        "Belgium"
+      ],
+      "customer": "Toyota Financial Services Belgium",
+      "customer_code": "TFSBE",
+      "sites": [
+        {
+          "label": "Brussels Office",
+          "customer_address": [
+            "Avenue du Bourget 42",
+            "1130 Brussels",
+            "Belgium"
+          ],
+          "city": "Brussels",
+          "postcode": "1130",
+          "meter_id": "BTG-BRU-HT-31021",
+          "capacity_kw": 132,
+          "capacity_rate": "5.35",
+          "base_consumption": 15600,
+          "unit_price_base": "0.067",
+          "start_reading": 351220,
+          "billing_periods": [
+            { "year": 2026, "month": 1 },
+            { "year": 2026, "month": 2 },
+            { "year": 2026, "month": 3 },
+            { "year": 2026, "month": 4 },
+            { "year": 2026, "month": 5 },
+            { "year": 2026, "month": 6 }
+          ]
+        },
+        {
+          "label": "Antwerp Office",
+          "customer_address": [
+            "Noorderlaan 147",
+            "2030 Antwerp",
+            "Belgium"
+          ],
+          "city": "Antwerp",
+          "postcode": "2030",
+          "meter_id": "BTG-ANR-HT-31022",
+          "capacity_kw": 118,
+          "capacity_rate": "5.10",
+          "base_consumption": 14100,
+          "unit_price_base": "0.065",
+          "start_reading": 287640,
+          "billing_periods": [
+            { "year": 2026, "month": 7 },
+            { "year": 2026, "month": 8 },
+            { "year": 2026, "month": 9 },
+            { "year": 2026, "month": 10 },
+            { "year": 2026, "month": 11 },
+            { "year": 2026, "month": 12 }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Toyota Financial Services Ireland",
+      "supplier": "Emerald Thermal Utilities Ltd",
+      "supplier_code": "ETU",
+      "supplier_address": [
+        "Custom House Yard",
+        "9 River Lane",
+        "Dublin D01 V6F4",
+        "Ireland"
+      ],
+      "customer": "Toyota Financial Services Ireland",
+      "customer_code": "TFSI",
+      "sites": [
+        {
+          "label": "Dublin HQ",
+          "customer_address": [
+            "Block C, Eastpoint Business Park",
+            "Clontarf Road",
+            "Dublin 3 D03 A0H3",
+            "Ireland"
+          ],
+          "city": "Dublin",
+          "postcode": "D03 A0H3",
+          "meter_id": "ETU-DUB-HT-47216",
+          "capacity_kw": 145,
+          "capacity_rate": "5.55",
+          "base_consumption": 16500,
+          "unit_price_base": "0.064",
+          "start_reading": 462180,
+          "billing_periods": [
+            { "year": 2026, "month": 1 },
+            { "year": 2026, "month": 2 },
+            { "year": 2026, "month": 3 },
+            { "year": 2026, "month": 4 },
+            { "year": 2026, "month": 5 },
+            { "year": 2026, "month": 6 }
+          ]
+        },
+        {
+          "label": "Cork Office",
+          "customer_address": [
+            "Penrose Wharf Business Centre",
+            "Penrose Quay",
+            "Cork T23 YY09",
+            "Ireland"
+          ],
+          "city": "Cork",
+          "postcode": "T23 YY09",
+          "meter_id": "ETU-CRK-HT-47217",
+          "capacity_kw": 101,
+          "capacity_rate": "5.20",
+          "base_consumption": 12100,
+          "unit_price_base": "0.061",
+          "start_reading": 238440,
+          "billing_periods": [
+            { "year": 2026, "month": 7 },
+            { "year": 2026, "month": 8 },
+            { "year": 2026, "month": 9 },
+            { "year": 2026, "month": 10 },
+            { "year": 2026, "month": 11 },
+            { "year": 2026, "month": 12 }
+          ]
+        }
+      ]
+    }
+  ]
+}
