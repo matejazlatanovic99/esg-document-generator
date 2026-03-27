@@ -200,10 +200,11 @@ def render_sidebar() -> tuple[str, str, str]:
         coming_soon_formats = [f for f, v in OUTPUT_FORMATS.items() if not v["implemented"]]
         format_display = implemented_formats + [f"{f} (Coming Soon)" for f in coming_soon_formats]
 
+        default_fmt_idx = format_display.index("XLSX") if "XLSX" in format_display else 0
         output_format_display: str = st.selectbox(
             "Output Format",
             options=format_display,
-            index=0,
+            index=default_fmt_idx,
             key="sidebar_format",
         )
         output_format = output_format_display.removesuffix(" (Coming Soon)")
