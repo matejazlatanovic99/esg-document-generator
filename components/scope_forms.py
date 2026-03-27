@@ -4,6 +4,29 @@ from datetime import date
 
 import streamlit as st
 
+from components.sidebar import COMPANIES, NEW_COMPANY_PLACEHOLDER
+
+_CURRENCY_DISPLAY: dict[str, str] = {
+    "GBP": "GBP (£)",
+    "EUR": "EUR (€)",
+    "USD": "USD ($)",
+    "JPY": "JPY (¥)",
+    "DKK": "DKK (kr)",
+    "HUF": "HUF (Ft)",
+}
+
+_COMPANIES_LIST = list(COMPANIES.items())
+
+
+def _make_code(name: str) -> str:
+    parts = []
+    for w in name.split():
+        if w.isupper() and len(w) <= 5:
+            parts.append(w)
+        else:
+            parts.append(w[0].upper())
+    return "".join(parts)
+
 _LANGUAGE_OPTIONS: dict[str, str] = {
     "English":            "en",
     "French (Français)":  "fr",
@@ -177,6 +200,30 @@ _COMPANY_DEFAULTS = [
         "customer": "Toyota Financial Services Belgium",
         "customer_code": "TFSBE",
     },
+    {
+        "label": "Toyota Financial Services Slovakia",
+        "supplier": "Bratislava Heat Distribution s.r.o.",
+        "supplier_code": "BHD",
+        "supplier_address": "Priemyselná 12\n821 09 Bratislava\nSlovakia",
+        "customer": "Toyota Financial Services Slovakia",
+        "customer_code": "TFSSK",
+    },
+    {
+        "label": "Toyota Financial Services Ireland",
+        "supplier": "Dublin Thermal Networks Ltd",
+        "supplier_code": "DTN",
+        "supplier_address": "Unit 4, Parkwest Business Park\nNangor Road\nDublin 12\nIreland",
+        "customer": "Toyota Financial Services Ireland",
+        "customer_code": "TFSIE",
+    },
+    {
+        "label": "Toyota Financial Services Danmark",
+        "supplier": "Dansk Fjernvarme Forsyning A/S",
+        "supplier_code": "DFF",
+        "supplier_address": "Energivej 23\n2750 Ballerup\nDenmark",
+        "customer": "Toyota Financial Services Danmark",
+        "customer_code": "TFSDK",
+    },
 ]
 
 _SITE_DEFAULTS = [
@@ -232,6 +279,48 @@ _SITE_DEFAULTS = [
             "start_reading": 287640,
         },
     ],
+    [
+        {
+            "label": "Bratislava HQ",
+            "address": "Aupark Tower\nEinsteinova 24\n851 01 Bratislava\nSlovakia",
+            "city": "Bratislava",
+            "postcode": "851 01",
+            "meter_id": "BHD-BTS-HT-44201",
+            "capacity_kw": 98,
+            "capacity_rate": 4.80,
+            "base_consumption": 11200,
+            "unit_price_base": 0.061,
+            "start_reading": 198450,
+        },
+    ],
+    [
+        {
+            "label": "Dublin Office",
+            "address": "Parkwest Business Park\nNangor Road\nDublin 12\nIreland",
+            "city": "Dublin",
+            "postcode": "D12 X527",
+            "meter_id": "DTN-DUB-HT-57301",
+            "capacity_kw": 110,
+            "capacity_rate": 5.20,
+            "base_consumption": 12800,
+            "unit_price_base": 0.068,
+            "start_reading": 224780,
+        },
+    ],
+    [
+        {
+            "label": "Ballerup Office",
+            "address": "Lautrupvang 8\n2750 Ballerup\nDenmark",
+            "city": "Ballerup",
+            "postcode": "2750",
+            "meter_id": "DFF-BAL-HT-62401",
+            "capacity_kw": 88,
+            "capacity_rate": 4.60,
+            "base_consumption": 10100,
+            "unit_price_base": 0.058,
+            "start_reading": 176320,
+        },
+    ],
 ]
 
 
@@ -243,16 +332,24 @@ _SITE_OMIT_FIELDS = [
 
 
 def _co_default(i: int, field: str, fallback: str = "") -> str:
-    """Return pre-filled demo value only for the first company; new companies start blank."""
-    if i == 0 and _COMPANY_DEFAULTS:
-        return _COMPANY_DEFAULTS[0].get(field, fallback)
+    """Return pre-filled value from hardcoded defaults or COMPANIES list."""
+    if i < len(_COMPANY_DEFAULTS):
+        return _COMPANY_DEFAULTS[i].get(field, fallback)
+    ci = (i - len(_COMPANY_DEFAULTS)) % len(_COMPANIES_LIST)
+    name, data = _COMPANIES_LIST[ci]
+    if field in ("label", "customer"):
+        return name
+    if field == "customer_code":
+        return _make_code(name)
+    if field == "currency":
+        return _CURRENCY_DISPLAY.get(data["currency"], data["currency"])
     return fallback
 
 
 def _site_default(i: int, j: int, field: str, fallback=None):
-    """Return pre-filled demo value only for the first company's sites."""
-    if i == 0 and _SITE_DEFAULTS and j < len(_SITE_DEFAULTS[0]):
-        return _SITE_DEFAULTS[0][j].get(field, fallback)
+    """Return pre-filled demo value for any company that has site defaults."""
+    if i < len(_SITE_DEFAULTS) and j < len(_SITE_DEFAULTS[i]):
+        return _SITE_DEFAULTS[i][j].get(field, fallback)
     return fallback
 
 
@@ -288,7 +385,7 @@ def _render_company_form(i: int, fp_months: list[tuple[int, int]]) -> None:
         _field(st.text_input, "Customer Code", f"co_{i}_customer_code",
                value=_co_default(i, "customer_code"))
         with st.expander("Advanced Options"):
-            st.text_input("Currency", value="GBP (£)", key=f"co_{i}_currency")
+            st.text_input("Currency", value=_co_default(i, "currency", _CURRENCY_DISPLAY.get(NEW_COMPANY_PLACEHOLDER["currency"], "EUR (€)")), key=f"co_{i}_currency")
             st.color_picker("Accent Colour", value="#1E5B88", key=f"co_{i}_accent")
 
     st.markdown(f"**Sites for Company {i + 1}**")

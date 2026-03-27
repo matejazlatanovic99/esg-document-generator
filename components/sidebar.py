@@ -2,6 +2,101 @@ from __future__ import annotations
 
 import streamlit as st
 
+COMPANIES: dict[str, dict] = {
+    "Toyota Kinto": {
+        "country": "Japan",
+        "industry": "Automotive / Mobility Services",
+        "reporting_year": 2026,
+        "currency": "JPY",
+        "fiscal_year_end": "March 31",
+    },
+    "Toyota Financial Services Corporation": {
+        "country": "United States",
+        "industry": "Financial Services / Automotive",
+        "reporting_year": 2026,
+        "currency": "USD",
+        "fiscal_year_end": "March 31",
+    },
+    "Toyota Financial Services UK group": {
+        "country": "United Kingdom",
+        "industry": "Financial Services / Automotive",
+        "reporting_year": 2026,
+        "currency": "GBP",
+        "fiscal_year_end": "December 31",
+    },
+    "Toyota Financial Services Slovakia": {
+        "country": "Slovakia",
+        "industry": "Financial Services / Automotive",
+        "reporting_year": 2026,
+        "currency": "EUR",
+        "fiscal_year_end": "December 31",
+    },
+    "TEST Subsidiary": {
+        "country": "Slovakia",
+        "industry": "Test / Placeholder",
+        "reporting_year": 2026,
+        "currency": "EUR",
+        "fiscal_year_end": "December 31",
+    },
+    "Toyota Financial Services Belgium": {
+        "country": "Belgium",
+        "industry": "Financial Services / Automotive",
+        "reporting_year": 2026,
+        "currency": "EUR",
+        "fiscal_year_end": "December 31",
+    },
+    "Toyota Financial Services UK": {
+        "country": "United Kingdom",
+        "industry": "Financial Services / Automotive",
+        "reporting_year": 2026,
+        "currency": "GBP",
+        "fiscal_year_end": "December 31",
+    },
+    "Toyota Financial Services Ireland": {
+        "country": "Ireland",
+        "industry": "Financial Services / Automotive",
+        "reporting_year": 2026,
+        "currency": "EUR",
+        "fiscal_year_end": "December 31",
+    },
+    "Toyota Financial Services Danmark": {
+        "country": "Denmark",
+        "industry": "Financial Services / Automotive",
+        "reporting_year": 2026,
+        "currency": "DKK",
+        "fiscal_year_end": "December 31",
+    },
+    "Toyota Financial Services Hungary": {
+        "country": "Hungary",
+        "industry": "Financial Services / Automotive",
+        "reporting_year": 2026,
+        "currency": "HUF",
+        "fiscal_year_end": "December 31",
+    },
+    "Prazna": {
+        "country": "Slovakia",
+        "industry": "—",
+        "reporting_year": 2026,
+        "currency": "EUR",
+        "fiscal_year_end": "December 31",
+    },
+    "Toyota Kreditbank GMBH": {
+        "country": "Germany",
+        "industry": "Financial Services / Automotive",
+        "reporting_year": 2026,
+        "currency": "EUR",
+        "fiscal_year_end": "December 31",
+    },
+}
+
+NEW_COMPANY_PLACEHOLDER: dict = {
+    "country": "—",
+    "industry": "—",
+    "reporting_year": 2026,
+    "currency": "EUR",
+    "fiscal_year_end": "December 31",
+}
+
 SCOPE_CONFIG: dict[str, dict] = {
     "Scope 1: Direct Emissions": {
         "categories": {
