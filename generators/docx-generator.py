@@ -38,6 +38,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "row_unit_price":    "Heat Unit Price (£/kWh)",
         "row_capacity":      "Contracted Capacity (kW)",
         "row_capacity_rate": "Capacity Charge (£/kW/month)",
+        "row_supplier_ef":   "Supplier Emission Factor (kg CO\u2082e/kWh)",
         "box_charges":       "Charges & VAT Summary",
         "charge_heat":       "Heat Consumption Cost",
         "charge_capacity":   "Capacity Charge",
@@ -73,6 +74,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "row_unit_price":    "Prix unitaire (£/kWh)",
         "row_capacity":      "Capacité contractée (kW)",
         "row_capacity_rate": "Frais de capacité (£/kW/mois)",
+        "row_supplier_ef":   "Facteur d'émission fournisseur (kg CO\u2082e/kWh)",
         "box_charges":       "Résumé des charges et TVA",
         "charge_heat":       "Coût de consommation thermique",
         "charge_capacity":   "Frais de capacité",
@@ -108,6 +110,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "row_unit_price":    "Einheitspreis (£/kWh)",
         "row_capacity":      "Vertragsleistung (kW)",
         "row_capacity_rate": "Leistungsgebühr (£/kW/Monat)",
+        "row_supplier_ef":   "Emissionsfaktor Lieferant (kg CO\u2082e/kWh)",
         "box_charges":       "Kosten- und MwSt.-Übersicht",
         "charge_heat":       "Wärmeverbrauchskosten",
         "charge_capacity":   "Leistungsgebühr",
@@ -143,6 +146,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "row_unit_price":    "Eenheidsprijs (£/kWh)",
         "row_capacity":      "Gecontracteerd vermogen (kW)",
         "row_capacity_rate": "Vermogenstoeslag (£/kW/maand)",
+        "row_supplier_ef":   "Emissiefactor leverancier (kg CO\u2082e/kWh)",
         "box_charges":       "Kosten- en BTW-overzicht",
         "charge_heat":       "Warmteverbruikskosten",
         "charge_capacity":   "Vermogenstoeslag",
@@ -335,6 +339,7 @@ def _render_invoice(
         (strings["row_unit_price"],    "" if "unit_price"  in omit else _fmt_rate(rec["unit_price"], 3), False),
         (strings["row_capacity"],      "" if "capacity_kw" in omit else str(rec["capacity_kw"]),    False),
         (strings["row_capacity_rate"], "" if "capacity_rate" in omit else _fmt_rate(rec["capacity_rate"], 2), False),
+        (strings["row_supplier_ef"],   "" if "supplier_ef"   in omit else _fmt_rate(rec["supplier_ef"],   4), False),
     ]
 
     btbl = doc.add_table(rows=len(billing_rows) + 1, cols=2)

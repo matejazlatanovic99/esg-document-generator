@@ -1,0 +1,106 @@
+{
+    "heat": [
+        {
+            "name": "Albion District Energy Services",
+            "code": "ADES",
+            "address": "Meridian Utilities House\n41 Station Approach\nReading RG1 1LX\nUnited Kingdom"
+        },
+        {
+            "name": "Benelux Thermal Grid NV",
+            "code": "BTG",
+            "address": "Canal Logistics Campus\n27 Havenlaan\n1000 Brussels\nBelgium"
+        },
+        {
+            "name": "Bratislava Heat Distribution s.r.o.",
+            "code": "BHD",
+            "address": "Priemyselná 12\n821 09 Bratislava\nSlovakia"
+        },
+        {
+            "name": "Dublin Thermal Networks Ltd",
+            "code": "DTN",
+            "address": "Unit 4, Parkwest Business Park\nNangor Road\nDublin 12\nIreland"
+        },
+        {
+            "name": "Dansk Fjernvarme Forsyning A/S",
+            "code": "DFF",
+            "address": "Energivej 23\n2750 Ballerup\nDenmark"
+        },
+        {
+            "name": "Emerald Thermal Utilities Ltd",
+            "code": "ETU",
+            "address": "Custom House Yard\n9 River Lane\nDublin D01 V6F4\nIreland"
+        },
+        {
+            "name": "Fernwärme Deutschland GmbH",
+            "code": "FWD",
+            "address": "Wärmestraße 17\n50933 Cologne\nGermany"
+        },
+        {
+            "name": "Magyar Hőszolgáltató Kft.",
+            "code": "MHK",
+            "address": "Hőerőmű utca 8\n1211 Budapest\nHungary"
+        },
+        {
+            "name": "Nordic Heat Services AS",
+            "code": "NHS",
+            "address": "Varmeveien 5\n0283 Oslo\nNorway"
+        },
+        {
+            "name": "Iberian Thermal Solutions S.L.",
+            "code": "ITS",
+            "address": "Calle Energía 22\n28045 Madrid\nSpain"
+        }
+    ],
+    "electricity": [
+        {
+            "name": "OVO Energy Ltd",
+            "code": "OVO",
+            "address": "1 Rivergate\nTemple Quay\nBristol BS1 6ED\nUnited Kingdom"
+        },
+        {
+            "name": "Luminus NV/SA",
+            "code": "LMN",
+            "address": "Rue du Marquis 1 bte 1\n1000 Brussels\nBelgium"
+        },
+        {
+            "name": "Slovenské elektrárne a.s.",
+            "code": "SEA",
+            "address": "Atomová 1\n945 51 Mochovce\nSlovakia"
+        },
+        {
+            "name": "Electric Ireland",
+            "code": "EI",
+            "address": "Two Gateway\nEast Wall Road\nDublin D03 A995\nIreland"
+        },
+        {
+            "name": "Ørsted A/S",
+            "code": "ORD",
+            "address": "Kraftværksvej 53\n7000 Fredericia\nDenmark"
+        },
+        {
+            "name": "EDF Energy plc",
+            "code": "EDF",
+            "address": "10 Cheddar Mews\nLondon SE1 7JX\nUnited Kingdom"
+        },
+        {
+            "name": "RWE Vertrieb GmbH",
+            "code": "RWE",
+            "address": "Flamingoweg 1\n44139 Dortmund\nGermany"
+        },
+        {
+            "name": "Magyar Villamos Művek Zrt.",
+            "code": "MVM",
+            "address": "Csörsz utca 11\n1124 Budapest\nHungary"
+        },
+        {
+            "name": "Vattenfall AB",
+            "code": "VAT",
+            "address": "Evenemangsgatan 13\n169 56 Solna\nSweden"
+        },
+        {
+            "name": "Endesa Energía S.A.",
+            "code": "END",
+            "address": "Ribera del Loira 60\n28042 Madrid\nSpain"
+        }
+    ]
+}

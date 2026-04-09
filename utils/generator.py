@@ -19,10 +19,11 @@ def _load_module(name: str, path: Path):
 
 
 # Load once at import time so fonts are registered only once.
-_pdf_gen = _load_module("pdf_generator", _GENERATORS_DIR / "pdf-generator.py")
-_xlsx_gen = _load_module("xlsx_generator", _GENERATORS_DIR / "xlsx-generator.py")
-_csv_gen  = _load_module("csv_generator",  _GENERATORS_DIR / "csv-generator.py")
-_docx_gen = _load_module("docx_generator", _GENERATORS_DIR / "docx-generator.py")
+_pdf_gen    = _load_module("pdf_generator",   _GENERATORS_DIR / "pdf-generator.py")
+_xlsx_gen   = _load_module("xlsx_generator",  _GENERATORS_DIR / "xlsx-generator.py")
+_csv_gen    = _load_module("csv_generator",   _GENERATORS_DIR / "csv-generator.py")
+_docx_gen   = _load_module("docx_generator",  _GENERATORS_DIR / "docx-generator.py")
+_elec_gen   = _load_module("elec_generator",  _GENERATORS_DIR / "electricity-generator.py")
 
 
 def _build_normalized_config(raw_config: dict) -> tuple[dict, list[dict]]:
@@ -58,10 +59,44 @@ def _build_normalized_config(raw_config: dict) -> tuple[dict, list[dict]]:
     return config, sections
 
 
+def _build_electricity_config(raw_config: dict) -> tuple[dict, list[dict]]:
+    """Parse dates, normalise companies and sites for electricity. Returns (config, sections)."""
+    fp_raw = raw_config["financial_period"]
+    financial_period = {
+        "label":      fp_raw["label"],
+        "start_date": datetime.strptime(fp_raw["start_date"], "%Y-%m-%d").date(),
+        "end_date":   datetime.strptime(fp_raw["end_date"],   "%Y-%m-%d").date(),
+    }
+    normalized_companies = []
+    for idx, company in enumerate(raw_config["companies"]):
+        norm = _elec_gen.normalize_company(company, financial_period, idx)
+        norm["_omit"] = company.get("_omit", {})
+        raw_sites = company.get("sites", [])
+        for sj, norm_site in enumerate(norm["sites"]):
+            norm_site["_omit"] = raw_sites[sj].get("_omit", {}) if sj < len(raw_sites) else {}
+        normalized_companies.append(norm)
+
+    doc_cfg = raw_config["document"]
+    config = {
+        "random_seed": int(raw_config.get("random_seed", 42)),
+        "document": {
+            "title":       doc_cfg.get("title", "Electricity Consumption Statement"),
+            "subject":     doc_cfg.get("subject", "Scope 2 Electricity"),
+            "language":    doc_cfg.get("language", "en"),
+            "noise_level": float(doc_cfg.get("noise_level", 1.0)),
+        },
+        "financial_period": financial_period,
+        "companies": normalized_companies,
+    }
+    sections = _elec_gen.build_sections(config)
+    return config, sections
+
+
 # Maps form-level site omit keys → record field names they blank in XLSX
 _SITE_NUMERIC_OMIT_MAP: dict[str, list[str]] = {
     "capacity_kw":       ["capacity_kw"],
     "capacity_rate":     ["capacity_rate"],
+    "supplier_ef":       ["supplier_ef"],
     "base_consumption":  ["consumption"],
     "unit_price_base":   ["unit_price"],
     "start_reading":     ["prev_read", "curr_read"],
@@ -217,3 +252,49 @@ def generate_csv_document(raw_config: dict) -> bytes:
     if raw_config["document"].get("inject_special_chars", False):
         blanked_sections = _apply_special_chars(blanked_sections)
     return _csv_gen.generate_csv(config, blanked_sections, blank_fields=csv_blank)
+
+
+# ── Electricity generation ────────────────────────────────────────────────────
+
+def generate_electricity_pdf_document(raw_config: dict) -> bytes:
+    """Generate a Scope 2 electricity PDF statement and return its bytes."""
+    config, sections = _build_electricity_config(raw_config)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bg_dir = os.path.join(tmpdir, "_backgrounds")
+        os.makedirs(bg_dir)
+
+        doc_cfg     = raw_config["document"]
+        pdf_filename = doc_cfg.get("pdf_filename", "electricity_statement.pdf")
+        output_path = os.path.join(tmpdir, pdf_filename)
+
+        config["document"].update({
+            "output_dir":   tmpdir,
+            "pdf_filename": pdf_filename,
+            "pdf_path":     output_path,
+            "background_dir": bg_dir,
+        })
+
+        noise_level = float(doc_cfg.get("noise_level", 1.0))
+        _elec_gen.render_pdf(config, sections, output_path, noise_level=noise_level)
+
+        with open(output_path, "rb") as fh:
+            return fh.read()
+
+
+def generate_electricity_xlsx_document(raw_config: dict) -> bytes:
+    """Generate a Scope 2 electricity XLSX workbook and return its bytes."""
+    config, sections = _build_electricity_config(raw_config)
+    return _elec_gen.generate_xlsx(config, sections)
+
+
+def generate_electricity_csv_document(raw_config: dict) -> bytes:
+    """Generate a Scope 2 electricity CSV and return its bytes."""
+    config, sections = _build_electricity_config(raw_config)
+    return _elec_gen.generate_csv(config, sections)
+
+
+def generate_electricity_docx_document(raw_config: dict) -> bytes:
+    """Generate a Scope 2 electricity DOCX document and return its bytes."""
+    config, sections = _build_electricity_config(raw_config)
+    return _elec_gen.generate_docx(config, sections)

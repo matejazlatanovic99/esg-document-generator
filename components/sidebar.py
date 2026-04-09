@@ -111,7 +111,7 @@ SCOPE_CONFIG: dict[str, dict] = {
             "Electricity": "electricity",
             "Purchased Heat / Steam / Cooling": "purchased_heat_steam_cooling",
         },
-        "implemented": {"purchased_heat_steam_cooling"},
+        "implemented": {"purchased_heat_steam_cooling", "electricity"},
     },
     "Scope 3: Upstream": {
         "categories": {

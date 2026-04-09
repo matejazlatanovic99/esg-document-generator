@@ -15,6 +15,7 @@ A Streamlit web application for generating ESG (Environmental, Social, Governanc
 | Scope | Category | Status |
 |---|---|---|
 | Scope 2: Indirect Energy | Purchased Heat / Steam / Cooling | Implemented |
+| Scope 2: Indirect Energy | Electricity | Implemented |
 | Scope 1: Direct Emissions | Stationary Combustion | Coming Soon |
 | Scope 1: Direct Emissions | Mobile Combustion | Coming Soon |
 | Scope 1: Direct Emissions | Fugitive Emissions | Coming Soon |
@@ -28,8 +29,8 @@ A Streamlit web application for generating ESG (Environmental, Social, Governanc
 |---|---|
 | PDF | Implemented |
 | XLSX | Implemented |
-| DOCX | Coming Soon |
-| CSV | Coming Soon |
+| DOCX | Implemented |
+| CSV | Implemented |
 
 ## Project structure
 

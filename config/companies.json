@@ -1,0 +1,47 @@
+[
+    {
+        "name": "Toyota Financial Services UK",
+        "code": "TFSUK",
+        "currency": "GBP"
+    },
+    {
+        "name": "Toyota Financial Services Belgium",
+        "code": "TFSBE",
+        "currency": "EUR"
+    },
+    {
+        "name": "Toyota Financial Services Slovakia",
+        "code": "TFSSK",
+        "currency": "EUR"
+    },
+    {
+        "name": "Toyota Financial Services Ireland",
+        "code": "TFSIE",
+        "currency": "EUR"
+    },
+    {
+        "name": "Toyota Financial Services Danmark",
+        "code": "TFSDK",
+        "currency": "DKK"
+    },
+    {
+        "name": "Toyota Financial Services Corporation",
+        "code": "TFSCORP",
+        "currency": "USD"
+    },
+    {
+        "name": "Toyota Financial Services Hungary",
+        "code": "TFSHUN",
+        "currency": "HUF"
+    },
+    {
+        "name": "Toyota Kreditbank GmbH",
+        "code": "TKB",
+        "currency": "EUR"
+    },
+    {
+        "name": "Toyota Kinto",
+        "code": "KINTO",
+        "currency": "JPY"
+    }
+]
