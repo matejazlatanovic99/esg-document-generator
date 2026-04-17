@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import streamlit as st
 
-from components.sidebar import OUTPUT_FORMATS, SCOPE_CONFIG, render_sidebar
+from components.sidebar import (
+    OUTPUT_FORMATS,
+    SCOPE_CONFIG,
+    get_allowed_formats,
+    get_document_type_config,
+    render_sidebar,
+)
 from components.scope_forms import render_scope_form
-from utils.config import build_raw_config, build_raw_config_electricity, validate_raw_config, validate_raw_config_electricity
+from utils.category_registry import get_category_workflow
 from utils.generator import (
-    generate_csv_document,
-    generate_docx_document,
-    generate_json_ground_truth,
-    generate_pdf_document,
-    generate_xlsx_document,
-    generate_electricity_pdf_document,
-    generate_electricity_xlsx_document,
-    generate_electricity_csv_document,
-    generate_electricity_docx_document,
+    generate_document_bytes,
 )
 
 st.set_page_config(
@@ -28,8 +26,9 @@ st.set_page_config(
 # Supported params:
 #   scope    : 1 | 2 | 3u | 3d
 #   category : heat | electricity | stationary | mobile | fugitive | ...
+#   doc_type : utility_bill | supplier_portal_data | electricity_bill | smart_meter_data
 #   format   : pdf | xlsx | csv | docx
-# Example: ?scope=2&category=electricity&format=xlsx
+# Example: ?scope=2&category=electricity&doc_type=smart_meter_data&format=xlsx
 # ---------------------------------------------------------------------------
 _SCOPE_PARAM_MAP: dict[str, str] = {
     "1":  "Scope 1: Direct Emissions",
@@ -71,6 +70,11 @@ if "sidebar_category" not in st.session_state:
     if _qp_cat in _CATEGORY_PARAM_MAP:
         st.session_state["sidebar_category"] = _CATEGORY_PARAM_MAP[_qp_cat]
 
+if "sidebar_document_type" not in st.session_state:
+    _qp_doc_type = _qp.get("doc_type", "").lower()
+    if _qp_doc_type:
+        st.session_state["sidebar_document_type"] = _qp_doc_type
+
 if "sidebar_format" not in st.session_state:
     _qp_fmt = _qp.get("format", "").lower()
     if _qp_fmt in _FORMAT_PARAM_MAP:
@@ -89,26 +93,35 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Sidebar → scope / category / format selection
 # ---------------------------------------------------------------------------
-scope, category, output_format = render_sidebar()
+scope, category, document_type, output_format = render_sidebar()
+workflow = get_category_workflow(category)
 
 # Keep URL query params in sync with current sidebar selections.
 _cat_label = next((lbl for lbl, k in SCOPE_CONFIG[scope]["categories"].items() if k == category), category)
-st.query_params.update({
+query_params = {
     "scope":    _SCOPE_PARAM_REV.get(scope, "2"),
     "category": _CATEGORY_PARAM_REV.get(_cat_label, category),
-    "format":   _FORMAT_PARAM_REV.get(output_format, output_format.lower()),
-})
+}
+if document_type:
+    query_params["doc_type"] = document_type
+if output_format:
+    query_params["format"] = _FORMAT_PARAM_REV.get(output_format, output_format.lower())
+st.query_params.update(query_params)
 
 # Determine whether the selected combination is currently implemented.
 scope_data = SCOPE_CONFIG[scope]
 cat_implemented = category in scope_data["implemented"]
-fmt_implemented = OUTPUT_FORMATS[output_format]["implemented"]
-is_ready = cat_implemented and fmt_implemented
+document_type_cfg = get_document_type_config(category, document_type or "")
+doc_type_implemented = bool(document_type_cfg.get("implemented", False))
+allowed_formats = get_allowed_formats(category, document_type or "")
+format_allowed = bool(output_format and output_format in allowed_formats)
+fmt_implemented = bool(output_format and OUTPUT_FORMATS[output_format]["implemented"])
+is_ready = cat_implemented and doc_type_implemented and format_allowed and fmt_implemented
 
 # ---------------------------------------------------------------------------
 # Main form
 # ---------------------------------------------------------------------------
-form_data = render_scope_form(scope, category)
+form_data = render_scope_form(scope, category, document_type)
 
 if form_data is None:
     # Coming-soon branch: nothing more to do.
@@ -117,7 +130,19 @@ if form_data is None:
 # ---------------------------------------------------------------------------
 # Format warning (form shown but format not ready)
 # ---------------------------------------------------------------------------
-if not fmt_implemented:
+if document_type and not doc_type_implemented:
+    st.warning(
+        f"**{document_type_cfg.get('label', document_type)}** is not yet implemented.",
+        icon="⚠️",
+    )
+elif output_format and not format_allowed:
+    allowed_label = ", ".join(allowed_formats)
+    st.warning(
+        f"**{output_format}** is not available for **{document_type_cfg.get('label', document_type)}**. "
+        f"Allowed formats: **{allowed_label}**.",
+        icon="⚠️",
+    )
+elif output_format and not fmt_implemented:
     st.warning(
         f"**{output_format}** format is not yet implemented. "
         "Switch to **PDF** in the sidebar to generate a document.",
@@ -142,61 +167,29 @@ with btn_col:
 # Generation logic
 # ---------------------------------------------------------------------------
 if generate_clicked and is_ready:
-    _is_electricity = form_data.get("_category") == "electricity"
+    if workflow is None:
+        st.error(f"No category workflow is registered for '{category}'.")
+        st.stop()
 
-    if _is_electricity:
-        raw_config = build_raw_config_electricity(form_data)
-        errors = validate_raw_config_electricity(raw_config)
-    else:
-        raw_config = build_raw_config(form_data)
-        errors = validate_raw_config(raw_config)
+    raw_config = workflow.raw_config_builder(form_data)
+    errors = workflow.validator(raw_config)
 
     if errors:
         st.error("Please fix the following issues before generating:")
         for err in errors:
             st.markdown(f"- {err}")
     else:
-        # Build filename: {category}_{fp_start}_{fp_end}.{ext}
-        # e.g. heat_2025-04_2025-09.xlsx  or  electricity_2026-01_2026-12.pdf
-        _cat_slug = {
-            "purchased_heat_steam_cooling": "heat",
-            "electricity": "electricity",
-        }.get(category, category.split("_")[0])
-        _fp_start = form_data.get("fp_start", "")[:7]   # "YYYY-MM"
-        _fp_end   = form_data.get("fp_end",   "")[:7]
-        _period_slug = f"{_fp_start}_{_fp_end}" if _fp_start != _fp_end else _fp_start
-        _base_name = f"{_cat_slug}_{_period_slug}"
+        base_name = workflow.build_filename_base(document_type, form_data)
+        zip_export = workflow.should_zip_export(document_type, output_format, form_data)
         with st.spinner("Building document… this may take a moment."):
             try:
                 fmt_cfg = OUTPUT_FORMATS[output_format]
-                filename = _base_name + fmt_cfg["ext"]
+                filename = base_name + (".zip" if zip_export else fmt_cfg["ext"])
+                mime = "application/zip" if zip_export else fmt_cfg["mime"]
+                file_bytes = generate_document_bytes(raw_config, output_format)
 
-                if _is_electricity:
-                    if output_format == "PDF":
-                        file_bytes = generate_electricity_pdf_document(raw_config)
-                    elif output_format == "XLSX":
-                        file_bytes = generate_electricity_xlsx_document(raw_config)
-                    elif output_format == "CSV":
-                        file_bytes = generate_electricity_csv_document(raw_config)
-                    elif output_format == "DOCX":
-                        file_bytes = generate_electricity_docx_document(raw_config)
-                    else:
-                        raise NotImplementedError(f"Format {output_format} is not yet supported.")
-                    st.session_state["generated_ground_truth"] = b"{}"
-                elif output_format == "PDF":
-                    file_bytes = generate_pdf_document(raw_config)
-                elif output_format == "XLSX":
-                    file_bytes = generate_xlsx_document(raw_config)
-                elif output_format == "CSV":
-                    file_bytes = generate_csv_document(raw_config)
-                elif output_format == "DOCX":
-                    file_bytes = generate_docx_document(raw_config)
-                else:
-                    raise NotImplementedError(f"Format {output_format} is not yet supported.")
-
-                st.session_state["generated_file"] = (file_bytes, filename, fmt_cfg["mime"])
-                if not _is_electricity:
-                    st.session_state["generated_ground_truth"] = generate_json_ground_truth(raw_config)
+                st.session_state["generated_file"] = (file_bytes, filename, mime)
+                st.session_state["generated_ground_truth"] = workflow.ground_truth_builder(raw_config)
                 st.session_state.pop("generation_error", None)
                 st.success("Document generated successfully!")
             except Exception as exc:

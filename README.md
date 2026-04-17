@@ -16,7 +16,7 @@ A Streamlit web application for generating ESG (Environmental, Social, Governanc
 |---|---|---|
 | Scope 2: Indirect Energy | Purchased Heat / Steam / Cooling | Implemented |
 | Scope 2: Indirect Energy | Electricity | Implemented |
-| Scope 1: Direct Emissions | Stationary Combustion | Coming Soon |
+| Scope 1: Direct Emissions | Stationary Combustion | Implemented |
 | Scope 1: Direct Emissions | Mobile Combustion | Coming Soon |
 | Scope 1: Direct Emissions | Fugitive Emissions | Coming Soon |
 | Scope 2: Indirect Energy | Electricity | Coming Soon |
@@ -42,10 +42,14 @@ doc-generator/
 │   └── scope_forms.py             # Dynamic form rendering and data collection
 ├── utils/
 │   ├── config.py                   # Config builder and validator
-│   └── generator.py               # Integration with the PDF generator
+│   └── generator.py                # Category + format orchestration
 ├── generators/
-│   ├── pdf-generator.py            # PDF generation engine (ReportLab)
-│   └── pdf-generator.config.json  # Example configuration
+│   ├── heat_steam_generator.py     # Heat / steam domain logic
+│   ├── electricity_generator.py    # Electricity domain logic
+│   ├── pdf_generator.py            # PDF renderer / dispatcher
+│   ├── xlsx_generator.py           # XLSX renderer / dispatcher
+│   ├── csv_generator.py            # CSV renderer / dispatcher
+│   └── docx_generator.py           # DOCX renderer / dispatcher
 ├── requirements.txt
 ├── DEPLOY.md                       # Deployment instructions
 └── README.md
@@ -125,7 +129,7 @@ The Purchased Heat form maps to the following configuration schema:
 
 1. The Streamlit UI collects form data and builds a config dict (`utils/config.py`)
 2. The config is validated before generation
-3. `utils/generator.py` loads the PDF engine via `importlib`, normalises the config, and runs generation inside a temporary directory
+3. `utils/generator.py` normalises the config, routes it through the category module, and calls the relevant format renderer inside a temporary directory
 4. The PDF bytes are returned to the browser via `st.download_button` — nothing is written to disk permanently
 
 ## Deployment

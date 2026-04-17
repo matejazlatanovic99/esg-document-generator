@@ -1,5 +1,3 @@
-import argparse
-import json
 import math
 import os
 import random
@@ -16,15 +14,6 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(SCRIPT_DIR, "pdf-generator.config.json")
-
-DEFAULT_OUTPUT_DIR = "./outputs/utility-billing-2026"
-DEFAULT_PDF_FILENAME = "district_heating_billing_2026_scanned_style_readable.pdf"
-DEFAULT_BG_DIRNAME = "_page_backgrounds_v2"
-DEFAULT_RANDOM_SEED = 20260325
-DEFAULT_DOCUMENT_TITLE = "District Heating Billing Statement"
-DEFAULT_DOCUMENT_AUTHOR = "Genspark Document Generator"
-DEFAULT_DOCUMENT_SUBJECT = "Purchased Heat billing statements"
 DEFAULT_COMPANY_STYLES = [
     {"accent": "#1E5B88", "accent_soft": "#DCEBF5", "skew": -0.22},
     {"accent": "#3F6F47", "accent_soft": "#E2EFE5", "skew": 0.18},
@@ -259,63 +248,160 @@ LANGUAGE_LABELS: dict[str, str] = {
     "Dutch (Nederlands)":  "nl",
 }
 
+ELECTRICITY_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "logo_subtitle": "Electricity Supply Services",
+        "doc_title_heading": "Electricity Consumption Statement",
+        "doc_subtitle": "Scope 2 - Purchased Electricity",
+        "box_supplier": "Supplier Details",
+        "box_customer": "Customer / Site Address",
+        "box_period": "Statement Period",
+        "meta_period_label": "Period",
+        "meta_period_start": "Period Start",
+        "meta_period_end": "Period End",
+        "meta_ref": "Reference",
+        "meta_currency": "Currency",
+        "tbl_meter": "Meter & Consumption",
+        "tbl_grid": "Grid & Emissions",
+        "row_site": "Site",
+        "row_city": "City",
+        "row_postcode": "Postcode",
+        "row_meter_id": "Electricity Meter ID",
+        "row_unit": "Measurement Unit",
+        "row_start_read": "Start Meter Reading",
+        "row_end_read": "End Meter Reading",
+        "row_total_qty": "Total Consumption",
+        "row_supplier_ef": "Supplier Emission Factor (kg CO\u2082e/kWh)",
+        "row_emissions_kg": "Total Emissions (kg CO\u2082e)",
+        "row_emissions_t": "Total Emissions (tCO\u2082e)",
+        "tbl_tariff": "Tariff Breakdown",
+        "col_tariff_name": "Tariff / Rate",
+        "col_tariff_qty": "Quantity",
+        "col_tariff_unit": "Unit",
+        "col_tariff_rate": "Unit Cost",
+        "col_tariff_cost": "Cost",
+        "box_total": "Cost Summary",
+        "charge_total": "Total Electricity Cost",
+        "footer_note": "Scope 2 - Purchased Electricity (GHG Protocol, location-based method). Emission factors from national grid operator data.",
+        "footer_page": "Page {page} / {total}",
+    },
+    "fr": {
+        "logo_subtitle": "Services de fourniture d\u2019\u00e9lectricit\u00e9",
+        "doc_title_heading": "Relev\u00e9 de consommation \u00e9lectrique",
+        "doc_subtitle": "Scope 2 - \u00c9lectricit\u00e9 achet\u00e9e",
+        "box_supplier": "D\u00e9tails du fournisseur",
+        "box_customer": "Client / Adresse du site",
+        "box_period": "P\u00e9riode du relev\u00e9",
+        "meta_period_label": "P\u00e9riode",
+        "meta_period_start": "D\u00e9but de p\u00e9riode",
+        "meta_period_end": "Fin de p\u00e9riode",
+        "meta_ref": "R\u00e9f\u00e9rence",
+        "meta_currency": "Devise",
+        "tbl_meter": "Compteur & Consommation",
+        "tbl_grid": "R\u00e9seau & \u00c9missions",
+        "row_site": "Site",
+        "row_city": "Ville",
+        "row_postcode": "Code postal",
+        "row_meter_id": "ID du compteur \u00e9lectrique",
+        "row_unit": "Unit\u00e9 de mesure",
+        "row_start_read": "Relev\u00e9 initial",
+        "row_end_read": "Relev\u00e9 final",
+        "row_total_qty": "Consommation totale",
+        "row_supplier_ef": "Facteur d\u2019\u00e9mission fournisseur (kg CO\u2082e/kWh)",
+        "row_emissions_kg": "\u00c9missions totales (kg CO\u2082e)",
+        "row_emissions_t": "\u00c9missions totales (tCO\u2082e)",
+        "tbl_tariff": "Ventilation par tarif",
+        "col_tariff_name": "Tarif / Taux",
+        "col_tariff_qty": "Quantit\u00e9",
+        "col_tariff_unit": "Unit\u00e9",
+        "col_tariff_rate": "Co\u00fbt unitaire",
+        "col_tariff_cost": "Co\u00fbt",
+        "box_total": "R\u00e9sum\u00e9 des co\u00fbts",
+        "charge_total": "Co\u00fbt total de l\u2019\u00e9lectricit\u00e9",
+        "footer_note": "Scope 2 - \u00c9lectricit\u00e9 achet\u00e9e (protocole GHG, m\u00e9thode bas\u00e9e sur la localisation).",
+        "footer_page": "Page {page} / {total}",
+    },
+    "de": {
+        "logo_subtitle": "Stromversorgungsdienstleistungen",
+        "doc_title_heading": "Stromverbrauchsabrechnung",
+        "doc_subtitle": "Scope 2 - Eingekaufter Strom",
+        "box_supplier": "Lieferantendetails",
+        "box_customer": "Kunde / Standortadresse",
+        "box_period": "Abrechnungszeitraum",
+        "meta_period_label": "Zeitraum",
+        "meta_period_start": "Zeitraum Beginn",
+        "meta_period_end": "Zeitraum Ende",
+        "meta_ref": "Referenz",
+        "meta_currency": "W\u00e4hrung",
+        "tbl_meter": "Z\u00e4hler & Verbrauch",
+        "tbl_grid": "Netz & Emissionen",
+        "row_site": "Standort",
+        "row_city": "Stadt",
+        "row_postcode": "Postleitzahl",
+        "row_meter_id": "Stromz\u00e4hler-ID",
+        "row_unit": "Messeinheit",
+        "row_start_read": "Anfangsz\u00e4hlerstand",
+        "row_end_read": "Endz\u00e4hlerstand",
+        "row_total_qty": "Gesamtverbrauch",
+        "row_supplier_ef": "Emissionsfaktor Lieferant (kg CO\u2082e/kWh)",
+        "row_emissions_kg": "Gesamtemissionen (kg CO\u2082e)",
+        "row_emissions_t": "Gesamtemissionen (tCO\u2082e)",
+        "tbl_tariff": "Tarifaufschl\u00fcsselung",
+        "col_tariff_name": "Tarif / Satz",
+        "col_tariff_qty": "Menge",
+        "col_tariff_unit": "Einheit",
+        "col_tariff_rate": "Einheitspreis",
+        "col_tariff_cost": "Kosten",
+        "box_total": "Kosten\u00fcbersicht",
+        "charge_total": "Gesamtstromkosten",
+        "footer_note": "Scope 2 - Eingekaufter Strom (GHG-Protokoll, standortbasierte Methode). Emissionsfaktoren aus nationalen Netzbetreiberdaten.",
+        "footer_page": "Seite {page} / {total}",
+    },
+    "nl": {
+        "logo_subtitle": "Elektriciteitsleveringsdiensten",
+        "doc_title_heading": "Verklaring elektriciteitsverbruik",
+        "doc_subtitle": "Scope 2 - Ingekochte elektriciteit",
+        "box_supplier": "Leveranciersgegevens",
+        "box_customer": "Klant / Locatieadres",
+        "box_period": "Opgaveperiode",
+        "meta_period_label": "Periode",
+        "meta_period_start": "Begin periode",
+        "meta_period_end": "Einde periode",
+        "meta_ref": "Referentie",
+        "meta_currency": "Valuta",
+        "tbl_meter": "Meter & Verbruik",
+        "tbl_grid": "Net & Emissies",
+        "row_site": "Locatie",
+        "row_city": "Stad",
+        "row_postcode": "Postcode",
+        "row_meter_id": "Elektriciteitmeter-ID",
+        "row_unit": "Meeteenheid",
+        "row_start_read": "Beginmeterstand",
+        "row_end_read": "Eindmeterstand",
+        "row_total_qty": "Totaal verbruik",
+        "row_supplier_ef": "Emissiefactor leverancier (kg CO\u2082e/kWh)",
+        "row_emissions_kg": "Totale emissies (kg CO\u2082e)",
+        "row_emissions_t": "Totale emissies (tCO\u2082e)",
+        "tbl_tariff": "Tariefuitsplitsing",
+        "col_tariff_name": "Tarief",
+        "col_tariff_qty": "Hoeveelheid",
+        "col_tariff_unit": "Eenheid",
+        "col_tariff_rate": "Eenheidsprijs",
+        "col_tariff_cost": "Kosten",
+        "box_total": "Kostenoverzicht",
+        "charge_total": "Totale elektriciteitskosten",
+        "footer_note": "Scope 2 - Ingekochte elektriciteit (GHG-protocol, locatiegebaseerde methode). Emissiefactoren uit nationale netbeheerdergegevens.",
+        "footer_page": "Pagina {page} / {total}",
+    },
+}
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Generate district heating billing PDFs from config.")
-    parser.add_argument(
-        "--per-company",
-        action="store_true",
-        help="Generate one PDF per company instead of a single combined PDF.",
-    )
-    parser.add_argument(
-        "--company",
-        action="append",
-        default=[],
-        help="Generate only the named company label. Repeat to include multiple companies.",
-    )
-    return parser.parse_args()
+    raise RuntimeError("The standalone PDF CLI was removed. Use the app or utils.generator instead.")
 
 
 def load_config():
-    with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
-        config = json.load(fh)
-
-    document = config.get("document", {})
-    output_dir = document.get("output_dir", DEFAULT_OUTPUT_DIR)
-    pdf_filename = document.get("pdf_filename", DEFAULT_PDF_FILENAME)
-    bg_dirname = document.get("background_dirname", DEFAULT_BG_DIRNAME)
-    pdf_path = os.path.join(output_dir, pdf_filename)
-    bg_dir = os.path.join(output_dir, bg_dirname)
-
-    financial_period = config.get("financial_period", {})
-    if "label" not in financial_period or "start_date" not in financial_period or "end_date" not in financial_period:
-        raise ValueError("financial_period must define label, start_date, and end_date")
-
-    normalized_config = {
-        "random_seed": int(config.get("random_seed", DEFAULT_RANDOM_SEED)),
-        "document": {
-            "output_dir": output_dir,
-            "pdf_filename": pdf_filename,
-            "pdf_path": pdf_path,
-            "background_dir": bg_dir,
-            "title": document.get("title", DEFAULT_DOCUMENT_TITLE),
-            "subject": document.get("subject", DEFAULT_DOCUMENT_SUBJECT),
-        },
-        "financial_period": {
-            "label": financial_period["label"],
-            "start_date": parse_date(financial_period["start_date"]),
-            "end_date": parse_date(financial_period["end_date"]),
-        },
-    }
-
-    companies = config.get("companies", [])
-    if not companies:
-        raise ValueError("Configuration must include at least one company")
-
-    normalized_config["companies"] = [
-        normalize_company(company, normalized_config["financial_period"], idx) for idx, company in enumerate(companies)
-    ]
-    return normalized_config
+    raise RuntimeError("The standalone PDF config loader was removed. Use the app or utils.generator instead.")
 
 
 def normalize_company(company, financial_period, company_index):
@@ -819,7 +905,7 @@ def output_path_for_company(config, company):
     return os.path.join(config["document"]["output_dir"], filename)
 
 
-def render_pdf(config, sections, output_path, noise_level=1.0):
+def _render_heat_pdf(config, sections, output_path, noise_level=1.0):
     lang = config["document"].get("language", "en")
     strings = TRANSLATIONS.get(lang, TRANSLATIONS["en"])
 
@@ -867,26 +953,293 @@ def render_pdf(config, sections, output_path, noise_level=1.0):
     return output_path
 
 
+def _draw_electricity_kv_table(c, x, y, w, title, rows, accent, accent_soft, row_h=17):
+    total_h = row_h * (len(rows) + 1)
+    round_box(c, x, y, w, total_h)
+    c.saveState()
+    c.setFillColor(HexColor(accent_soft))
+    c.roundRect(x, y + total_h - row_h, w, row_h, 4, stroke=0, fill=1)
+    c.rect(x, y + total_h - row_h, w, row_h // 2, stroke=0, fill=1)
+    c.setFillColor(HexColor(accent))
+    c.setFont(FONT_BOLD, 8.1)
+    c.drawString(x + 8, y + total_h - 12.2, title)
+
+    split = x + w * 0.56
+    c.setStrokeColor(HexColor("#D5DADF"))
+    for idx in range(len(rows) + 1):
+        c.line(x, y + idx * row_h, x + w, y + idx * row_h)
+    c.line(split, y, split, y + total_h)
+
+    cy = y + total_h - row_h - 12.5
+    for row in rows:
+        field, value = row[0], row[1]
+        use_mono = row[2] if len(row) > 2 else False
+        c.setFillColor(HexColor("#5A6066"))
+        c.setFont(FONT_REG, 7.5)
+        c.drawString(x + 8, cy, field)
+        c.setFillColor(HexColor("#1F2328"))
+        c.setFont(FONT_MONO if use_mono else FONT_REG, 8.0)
+        val = str(value)
+        c.drawString(split + 8, cy, val[:45] + ("…" if len(val) > 45 else ""))
+        cy -= row_h
+    c.restoreState()
+
+
+def _draw_electricity_tariff_table(
+    c,
+    x,
+    y,
+    w,
+    title,
+    tariffs,
+    accent,
+    accent_soft,
+    strings,
+    symbol,
+    show_costs=True,
+    row_h=17,
+):
+    total_h = row_h * (len(tariffs) + 2)
+    if show_costs:
+        col_widths = [w * pct for pct in (0.32, 0.18, 0.14, 0.18, 0.18)]
+        headers = [
+            strings["col_tariff_name"],
+            strings["col_tariff_qty"],
+            strings["col_tariff_unit"],
+            strings["col_tariff_rate"],
+            strings["col_tariff_cost"],
+        ]
+    else:
+        col_widths = [w * pct for pct in (0.46, 0.27, 0.27)]
+        headers = [
+            strings["col_tariff_name"],
+            strings["col_tariff_qty"],
+            strings["col_tariff_unit"],
+        ]
+
+    round_box(c, x, y, w, total_h)
+    c.saveState()
+
+    title_y = y + total_h - row_h
+    c.setFillColor(HexColor(accent_soft))
+    c.roundRect(x, title_y, w, row_h, 4, stroke=0, fill=1)
+    c.rect(x, title_y, w, row_h // 2, stroke=0, fill=1)
+    c.setFillColor(HexColor(accent))
+    c.setFont(FONT_BOLD, 8.1)
+    c.drawString(x + 8, title_y + 4.8, title)
+
+    header_y = y + total_h - row_h * 2
+    c.setFillColor(HexColor(accent_soft))
+    c.rect(x, header_y, w, row_h, stroke=0, fill=1)
+    cursor_x = x
+    for header, col_w in zip(headers, col_widths):
+        c.setFillColor(HexColor(accent))
+        c.setFont(FONT_BOLD, 7.0)
+        c.drawString(cursor_x + 5, header_y + 5, header)
+        cursor_x += col_w
+
+    c.setStrokeColor(HexColor("#D5DADF"))
+    for idx in range(len(tariffs) + 2):
+        c.line(x, y + idx * row_h, x + w, y + idx * row_h)
+    cursor_x = x
+    for col_w in col_widths[:-1]:
+        cursor_x += col_w
+        c.line(cursor_x, y, cursor_x, y + total_h - row_h)
+
+    data_y = header_y - 12.5
+    for tariff in tariffs:
+        values = [tariff["name"], f"{float(tariff['quantity']):,.2f}", tariff["unit"]]
+        if show_costs:
+            values.extend([
+                f"{symbol}{float(tariff['unit_cost']):.4f}",
+                f"{symbol}{float(tariff['cost']):,.2f}",
+            ])
+        cursor_x = x
+        for value, col_w in zip(values, col_widths):
+            c.setFillColor(HexColor("#1F2328"))
+            c.setFont(FONT_REG, 7.5)
+            c.drawString(cursor_x + 5, data_y, value)
+            cursor_x += col_w
+        data_y -= row_h
+
+    c.restoreState()
+    return total_h
+
+
+def _draw_electricity_cost_box(c, x, y, w, h, site, accent, accent_soft, strings):
+    draw_info_box(c, x, y, w, h, strings["box_total"], [], accent, accent_soft)
+    symbol = site.get("currency_symbol", "")
+    total_str = f"{symbol}{float(site['total_cost']):,.2f}"
+    c.saveState()
+    sy = y + h - 30
+    c.setFillColor(HexColor(accent_soft))
+    c.roundRect(x + 8, sy - 8, w - 16, 24, 3, stroke=0, fill=1)
+    c.setFillColor(HexColor(accent))
+    c.setFont(FONT_BOLD, 10)
+    c.drawString(x + 14, sy + 5, strings["charge_total"])
+    c.drawRightString(x + w - 14, sy + 5, total_str)
+    c.restoreState()
+
+
+def _draw_electricity_page(c, company, site, page_no, total_pages, bg_path, fg_path, strings, noise_level=1.0):
+    accent = company["accent"]
+    accent_soft = company["accent_soft"]
+    margin = 32
+    content_w = PAGE_W - margin * 2
+
+    c.drawImage(ImageReader(bg_path), 0, 0, width=PAGE_W, height=PAGE_H, mask="auto")
+    c.saveState()
+    c.translate(PAGE_W / 2, PAGE_H / 2)
+    c.rotate(company["skew"] * noise_level + random.choice([-0.04, 0.03, 0.05]) * noise_level)
+    c.translate(-PAGE_W / 2, -PAGE_H / 2)
+
+    draw_logo(c, margin, PAGE_H - 72, accent, company["supplier"], strings)
+    c.setFillColor(HexColor("#1E2328"))
+    c.setFont(FONT_BOLD, 15)
+    c.drawRightString(PAGE_W - margin, PAGE_H - 50, strings["doc_title_heading"])
+    c.setFont(FONT_REG, 8.2)
+    c.drawRightString(PAGE_W - margin, PAGE_H - 64, strings["doc_subtitle"])
+    c.setFont(FONT_REG, 7.2)
+    c.drawRightString(PAGE_W - margin, PAGE_H - 77, f"{site['billing_period_label']} • {company['label']} • {site['label']}")
+
+    top_y = PAGE_H - 170
+    box_w = (content_w - 12) / 2
+    draw_info_box(c, margin, top_y, box_w, 92, strings["box_supplier"], company["supplier_address"], accent, accent_soft)
+    draw_info_box(c, margin + box_w + 12, top_y, box_w, 92, strings["box_customer"], site["customer_address"], accent, accent_soft)
+
+    period_lines = [
+        f"{strings['meta_period_label']}: {site['billing_period_label']}",
+        f"{strings['meta_period_start']}: {site['period_start'].strftime('%d %b %Y')}",
+        f"{strings['meta_period_end']}: {site['period_end'].strftime('%d %b %Y')}",
+        f"{strings['meta_ref']}: {site['ref_no']}",
+        f"{strings['meta_currency']}: {company['currency']}",
+    ]
+    draw_info_box(c, margin, top_y - 108, content_w, 84, strings["box_period"], period_lines, accent, accent_soft)
+
+    half_w = (content_w - 12) / 2
+    table_top = top_y - 120
+    unit = site["unit"]
+    site_omit = site.get("_omit", {})
+    show_readings = not site_omit.get("start_reading")
+    show_costs = not site_omit.get("total_cost")
+    show_emissions = not site_omit.get("supplier_ef")
+
+    meter_rows = [
+        (strings["row_site"], site["label"]),
+        (strings["row_city"], site["city"]),
+        (strings["row_postcode"], site["postcode"]),
+        (strings["row_meter_id"], site["meter_id"], True),
+        (strings["row_unit"], unit),
+        (strings["row_total_qty"], f"{float(site['total_quantity']):,.2f} {unit}"),
+    ]
+    if show_readings:
+        meter_rows.insert(5, (strings["row_start_read"], f"{site['start_reading']:,}"))
+        meter_rows.insert(6, (strings["row_end_read"], f"{site['end_reading']:,}"))
+
+    grid_rows = []
+    if show_emissions:
+        grid_rows = [
+            (strings["row_supplier_ef"], f"{float(site['supplier_ef']):.4f}"),
+            (strings["row_emissions_kg"], f"{float(site['emissions_kg']):,.2f}"),
+            (strings["row_emissions_t"], f"{float(site['emissions_t']):.3f}"),
+        ]
+
+    meter_h = (len(meter_rows) + 1) * 17
+    meter_y = table_top - meter_h
+    if grid_rows:
+        grid_h = (len(grid_rows) + 1) * 17
+        grid_y = table_top - grid_h
+        _draw_electricity_kv_table(c, margin, meter_y, half_w, strings["tbl_meter"], meter_rows, accent, accent_soft)
+        _draw_electricity_kv_table(c, margin + half_w + 12, grid_y, half_w, strings["tbl_grid"], grid_rows, accent, accent_soft)
+        cursor_y = min(meter_y, grid_y) - 10
+    else:
+        _draw_electricity_kv_table(c, margin, meter_y, content_w, strings["tbl_meter"], meter_rows, accent, accent_soft)
+        cursor_y = meter_y - 10
+
+    symbol = site.get("currency_symbol", "")
+    if site["tariffs"]:
+        tariff_h = _draw_electricity_tariff_table(
+            c,
+            margin,
+            cursor_y - (len(site["tariffs"]) + 2) * 17,
+            content_w,
+            strings["tbl_tariff"],
+            site["tariffs"],
+            accent,
+            accent_soft,
+            strings,
+            symbol,
+            show_costs=show_costs,
+        )
+        cursor_y -= tariff_h + 10
+
+    if show_costs:
+        _draw_electricity_cost_box(c, margin, cursor_y - 55, content_w, 55, site, accent, accent_soft, strings)
+
+    c.restoreState()
+    c.setStrokeColor(HexColor("#C9CDD2"))
+    c.line(margin, 42, PAGE_W - margin, 42)
+    c.setFillColor(HexColor("#5A6066"))
+    c.setFont(FONT_REG, 6.0)
+    c.drawString(margin, 25, strings["footer_note"])
+    c.drawRightString(PAGE_W - margin, 25, strings["footer_page"].format(page=page_no, total=total_pages))
+
+    if noise_level > 0 and os.path.exists(fg_path):
+        c.drawImage(ImageReader(fg_path), 0, 0, width=PAGE_W, height=PAGE_H, mask="auto")
+    c.showPage()
+
+
+def _render_electricity_pdf(config, sections, output_path, noise_level=1.0):
+    lang = config["document"].get("language", "en")
+    strings = ELECTRICITY_TRANSLATIONS.get(lang, ELECTRICITY_TRANSLATIONS["en"])
+    seed = config.get("random_seed", 42)
+    bg_dir = config["document"].get("background_dir", "/tmp")
+
+    bg_paths: dict[str, str] = {}
+    fg_paths: dict[str, str] = {}
+    for idx, section in enumerate(sections):
+        accent = section["company"]["accent"]
+        if accent not in bg_paths:
+            bg_path = os.path.join(bg_dir, f"elec_bg_{idx}.jpg")
+            fg_path = os.path.join(bg_dir, f"elec_fg_{idx}.png")
+            build_background(bg_path, accent=accent, seed=seed + idx, noise_level=noise_level)
+            build_foreground_noise(fg_path, seed=seed + idx, noise_level=noise_level)
+            bg_paths[accent] = bg_path
+            fg_paths[accent] = fg_path
+
+    c = canvas.Canvas(output_path, pagesize=A4)
+    c.setTitle(config["document"].get("title", "Electricity Consumption Statement"))
+    c.setSubject(config["document"].get("subject", "Scope 2 Electricity"))
+    c.setAuthor("ESG Document Generator")
+
+    for page_no, section in enumerate(sections, start=1):
+        company = section["company"]
+        site = section["site"]
+        random.seed(seed + page_no)
+        _draw_electricity_page(
+            c,
+            company,
+            site,
+            page_no,
+            len(sections),
+            bg_paths[company["accent"]],
+            fg_paths[company["accent"]],
+            strings,
+            noise_level=noise_level,
+        )
+    c.save()
+    return output_path
+
+
+def render_pdf(config, sections, output_path, category="heat", noise_level=1.0):
+    if category == "electricity":
+        return _render_electricity_pdf(config, sections, output_path, noise_level=noise_level)
+    return _render_heat_pdf(config, sections, output_path, noise_level=noise_level)
+
+
 def generate_pdf(per_company=False, company_labels=None):
-    config = load_config()
-    config = filtered_config(config, company_labels or [])
-    os.makedirs(config["document"]["output_dir"], exist_ok=True)
-    os.makedirs(config["document"]["background_dir"], exist_ok=True)
-
-    if per_company:
-        output_paths = []
-        for company in config["companies"]:
-            company_config = dict(config)
-            company_config["companies"] = [company]
-            sections = build_sections(company_config)
-            output_paths.append(render_pdf(company_config, sections, output_path_for_company(company_config, company)))
-        return output_paths
-
-    sections = build_sections(config)
-    return [render_pdf(config, sections, config["document"]["pdf_path"])]
+    raise RuntimeError("The standalone PDF CLI was removed. Use the app or utils.generator instead.")
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    for output_path in generate_pdf(per_company=args.per_company, company_labels=args.company):
-        print(output_path)
+    raise RuntimeError("The standalone PDF CLI was removed. Use the app or utils.generator instead.")
