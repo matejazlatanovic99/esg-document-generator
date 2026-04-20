@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import random
 from calendar import monthrange
 from datetime import date
@@ -35,6 +37,20 @@ _SMART_METER_TARIFF_POOLS = [
     ["Day", "Evening", "Night"],
     ["Weekday", "Weekend"],
 ]
+
+_CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config")
+
+
+def _load_json(filename: str):
+    path = os.path.join(_CONFIG_DIR, filename)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+_SITES_CONFIG: list = _load_json("sites.json") or []
 
 
 def _document_defaults(category: str, document_type: str | None) -> tuple[str, str]:
@@ -145,6 +161,33 @@ def _smart_meter_consumption_default(idx: int) -> float:
     return float(round(rng.uniform(12_000.0, 95_000.0), 2))
 
 
+def _config_site(idx: int) -> dict:
+    if not _SITES_CONFIG:
+        return {}
+    raw = f"site:0:{idx}".encode()
+    site_idx = int(hashlib.sha1(raw).hexdigest()[:4], 16) % len(_SITES_CONFIG)
+    return _SITES_CONFIG[site_idx]
+
+
+def _smart_meter_site_default(idx: int, field: str, fallback: str = "") -> str:
+    site = _config_site(idx)
+    return site.get(field, fallback)
+
+
+def _field(widget_fn, label: str, key: str, omit_default: bool = False, **kwargs) -> None:
+    is_omitted: bool = st.session_state.get(f"{key}_omit", omit_default)
+    field_col, omit_col = st.columns([8, 1])
+    with field_col:
+        widget_fn(label, key=key, disabled=is_omitted, **kwargs)
+    with omit_col:
+        st.checkbox(
+            "Omit",
+            value=omit_default,
+            key=f"{key}_omit",
+            help="Leave this field blank in the generated document (QA testing).",
+        )
+
+
 def _render_data_settings() -> None:
     st.markdown("#### Data Settings")
     granularity = st.radio(
@@ -239,11 +282,18 @@ def _render_meter_inputs() -> None:
                 )
 
             if granularity == "Monthly":
-                st.text_input(
+                site_key = f"smart_meter_site_label_{idx}"
+                default_site_label = _smart_meter_site_default(idx, "label", "")
+                if site_key not in st.session_state or (
+                    not st.session_state.get(site_key)
+                    and f"{site_key}_omit" not in st.session_state
+                ):
+                    st.session_state[site_key] = default_site_label
+                _field(
+                    st.text_input,
                     "Site",
-                    value="",
-                    key=f"smart_meter_site_label_{idx}",
-                    help="Optional. Leave blank if site should not be shown.",
+                    site_key,
+                    help="Site label shown in monthly smart meter output.",
                 )
 
 
@@ -279,7 +329,15 @@ def _collect_form_data(document_type: str | None) -> dict:
     for idx in range(meter_count):
         meter_id = s.get(f"smart_meter_meter_id_{idx}", "").strip() or _default_meter_id(idx)
         total_quantity = float(s.get(f"smart_meter_total_consumption_{idx}", 0.0))
-        site_label = s.get(f"smart_meter_site_label_{idx}", "").strip() if granularity == "monthly" else ""
+        if granularity == "monthly":
+            site_label = (
+                s.get(f"smart_meter_site_label_{idx}", "").strip()
+                or _smart_meter_site_default(idx, "label", "")
+            )
+            omit_site_label = bool(s.get(f"smart_meter_site_label_{idx}_omit", False))
+        else:
+            site_label = ""
+            omit_site_label = True
         sites.append({
             "label": site_label,
             "customer_address": [],
@@ -296,7 +354,7 @@ def _collect_form_data(document_type: str | None) -> dict:
                 "address": True,
                 "city": True,
                 "postcode": True,
-                "label": not bool(site_label),
+                "label": omit_site_label,
             },
         })
 

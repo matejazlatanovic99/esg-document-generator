@@ -202,6 +202,143 @@ def validate_raw_config_electricity(raw_config: dict) -> list[str]:
     )
 
 
+def _stationary_equipment_items(site: dict) -> list[dict]:
+    equipment_items = site.get("equipment_items")
+    if isinstance(equipment_items, list) and equipment_items:
+        return [
+            item if isinstance(item, dict) else {"equipment": str(item), "_omit": {}}
+            for item in equipment_items
+        ]
+    return [{
+        "equipment": site.get("equipment", ""),
+        "emission_source": site.get("emission_source", ""),
+        "_omit": {"emission_source": site.get("_omit", {}).get("emission_source", False)},
+    }]
+
+
+def _stationary_item_value(site: dict, item: dict, field: str, default=""):
+    value = item.get(field)
+    if value in (None, ""):
+        value = site.get(field, default)
+    return value
+
+
+def _validate_positive_float(errors: list[str], prefix: str, label: str, value) -> None:
+    try:
+        if float(value) <= 0:
+            errors.append(f"{prefix}: {label} must be greater than zero.")
+    except (TypeError, ValueError):
+        errors.append(f"{prefix}: {label} must be a valid number.")
+
+
+def _validate_nonnegative_float(errors: list[str], prefix: str, label: str, value) -> None:
+    try:
+        if float(value) < 0:
+            errors.append(f"{prefix}: {label} must not be negative.")
+    except (TypeError, ValueError):
+        errors.append(f"{prefix}: {label} must be a valid number.")
+
+
+def _validate_positive_int(errors: list[str], prefix: str, label: str, value) -> None:
+    try:
+        if int(value) <= 0:
+            errors.append(f"{prefix}: {label} must be greater than zero.")
+    except (TypeError, ValueError):
+        errors.append(f"{prefix}: {label} must be a whole number.")
+
+
+def _validate_stationary_equipment_items(
+    errors: list[str],
+    site: dict,
+    site_prefix: str,
+    *,
+    equipment_label: str = "Equipment",
+    require_emission_source: bool = False,
+    document_type: str | None = None,
+) -> None:
+    site_omit: dict = site.get("_omit", {})
+    equipment_items = _stationary_equipment_items(site)
+    if not equipment_items:
+        errors.append(f"{site_prefix}: At least one equipment item is required.")
+        return
+
+    for equipment_idx, item in enumerate(equipment_items, start=1):
+        item_prefix = f"{site_prefix} > Equipment {equipment_idx}"
+        item_omit: dict = item.get("_omit", {})
+        if (
+            not site_omit.get("equipment", False)
+            and not item_omit.get("equipment", False)
+            and not str(item.get("equipment", "")).strip()
+        ):
+            errors.append(f"{item_prefix}: {equipment_label} is required unless omitted.")
+        if (
+            require_emission_source
+            and not site_omit.get("emission_source", False)
+            and not item_omit.get("emission_source", False)
+            and not str(item.get("emission_source", "")).strip()
+        ):
+            errors.append(f"{item_prefix}: Emission source is required unless omitted.")
+
+        if document_type in {"fuel_invoice", "delivery_note", "fuel_card", "generator_log"}:
+            for field, label in [("fuel", "Fuel"), ("unit", "Unit")]:
+                if not str(_stationary_item_value(site, item, field, "")).strip():
+                    errors.append(f"{item_prefix}: {label} is required.")
+
+        if document_type in {"fuel_invoice", "delivery_note", "fuel_card"}:
+            quantity_label = "Delivered quantity" if document_type == "delivery_note" else "Quantity"
+            _validate_positive_float(
+                errors,
+                item_prefix,
+                quantity_label,
+                _stationary_item_value(site, item, "quantity", 0),
+            )
+
+        if document_type in {"fuel_invoice", "fuel_card"}:
+            _validate_positive_float(
+                errors,
+                item_prefix,
+                "Unit price",
+                _stationary_item_value(site, item, "unit_price", 0),
+            )
+
+        if document_type == "fuel_invoice":
+            _validate_nonnegative_float(
+                errors,
+                item_prefix,
+                "Delivery charge",
+                _stationary_item_value(site, item, "delivery_charge", 0),
+            )
+
+        if document_type == "generator_log":
+            _validate_positive_int(
+                errors,
+                item_prefix,
+                "Runs per month",
+                _stationary_item_value(site, item, "runs_per_month", 0),
+            )
+            _validate_positive_float(
+                errors,
+                item_prefix,
+                "Fuel used per hour",
+                _stationary_item_value(site, item, "fuel_used_per_hour", 0),
+            )
+            try:
+                min_hours = float(_stationary_item_value(site, item, "run_hours_min", 0))
+                max_hours = float(_stationary_item_value(site, item, "run_hours_max", 0))
+                if min_hours <= 0 or max_hours <= 0 or min_hours > max_hours:
+                    errors.append(f"{item_prefix}: Run hour bounds must be valid and increasing.")
+            except (TypeError, ValueError):
+                errors.append(f"{item_prefix}: Run hour bounds must be valid numbers.")
+
+            if _stationary_item_value(site, item, "quantity_mode", "tank_level_change") == "tank_level_change":
+                _validate_positive_float(
+                    errors,
+                    item_prefix,
+                    "Tank capacity",
+                    _stationary_item_value(site, item, "tank_capacity", 0),
+                )
+
+
 def validate_raw_config_stationary(raw_config: dict) -> list[str]:
     """Validation for stationary combustion configs."""
     errors = _validate_common_financial_period(raw_config)
@@ -232,6 +369,11 @@ def validate_raw_config_stationary(raw_config: dict) -> list[str]:
         sites: list[dict] = company.get("sites", [])
         if not sites:
             errors.append(f"{prefix}: At least one site is required.")
+        if document_type == "fuel_card":
+            if not str(company.get("merchant", "")).strip() and not any(str(site.get("merchant", "")).strip() for site in sites):
+                errors.append(f"{prefix}: Merchant is required.")
+            if not str(company.get("card_number", "")).strip() and not any(str(site.get("card_number", "")).strip() for site in sites):
+                errors.append(f"{prefix}: Card number is required.")
 
         for j, site in enumerate(sites):
             site_prefix = f"{prefix} > Site {j + 1} ({site.get('label', '?')})"
@@ -242,82 +384,52 @@ def validate_raw_config_stationary(raw_config: dict) -> list[str]:
                 site_omit: dict = site.get("_omit", {})
                 for field, label in [
                     ("label", "Site"),
-                    ("fuel", "Fuel"),
-                    ("unit", "Unit"),
                 ]:
                     if not str(site.get(field, "")).strip():
                         errors.append(f"{site_prefix}: {label} is required.")
 
                 if not site_omit.get("country", False) and not str(site.get("country", "")).strip():
                     errors.append(f"{site_prefix}: Country is required unless omitted.")
-                if not site_omit.get("equipment", False) and not str(site.get("equipment", "")).strip():
-                    errors.append(f"{site_prefix}: Equipment is required unless omitted.")
-                if not site_omit.get("emission_source", False) and not str(site.get("emission_source", "")).strip():
-                    errors.append(f"{site_prefix}: Emission source is required unless omitted.")
-
-                try:
-                    if float(site.get("quantity", 0)) <= 0:
-                        errors.append(f"{site_prefix}: Quantity must be greater than zero.")
-                except (TypeError, ValueError):
-                    errors.append(f"{site_prefix}: Quantity must be a valid number.")
-
-                try:
-                    if float(site.get("unit_price", 0)) <= 0:
-                        errors.append(f"{site_prefix}: Unit price must be greater than zero.")
-                except (TypeError, ValueError):
-                    errors.append(f"{site_prefix}: Unit price must be a valid number.")
+                _validate_stationary_equipment_items(
+                    errors,
+                    site,
+                    site_prefix,
+                    equipment_label="Equipment",
+                    require_emission_source=True,
+                    document_type=document_type,
+                )
             elif document_type == "delivery_note":
                 site_omit: dict = site.get("_omit", {})
                 for field, label in [
                     ("label", "Site"),
-                    ("fuel", "Fuel"),
-                    ("unit", "Unit"),
                 ]:
                     if not str(site.get(field, "")).strip():
                         errors.append(f"{site_prefix}: {label} is required.")
 
                 if not site_omit.get("country", False) and not str(site.get("country", "")).strip():
                     errors.append(f"{site_prefix}: Country is required unless omitted.")
-                if not site_omit.get("equipment", False) and not str(site.get("equipment", "")).strip():
-                    errors.append(f"{site_prefix}: Tank / equipment is required unless omitted.")
-
-                try:
-                    if float(site.get("quantity", 0)) <= 0:
-                        errors.append(f"{site_prefix}: Delivered quantity must be greater than zero.")
-                except (TypeError, ValueError):
-                    errors.append(f"{site_prefix}: Delivered quantity must be a valid number.")
+                _validate_stationary_equipment_items(
+                    errors,
+                    site,
+                    site_prefix,
+                    equipment_label="Tank / equipment",
+                    document_type=document_type,
+                )
             elif document_type == "fuel_card":
                 site_omit: dict = site.get("_omit", {})
-
-                for field, label in [
-                    ("merchant", "Merchant"),
-                    ("card_number", "Card number"),
-                    ("fuel", "Fuel"),
-                    ("unit", "Unit"),
-                ]:
-                    if not str(site.get(field, "")).strip():
-                        errors.append(f"{site_prefix}: {label} is required.")
 
                 if not site_omit.get("label", False) and not str(site.get("label", "")).strip():
                     errors.append(f"{site_prefix}: Site is required unless omitted.")
                 if not site_omit.get("country", False) and not str(site.get("country", "")).strip():
                     errors.append(f"{site_prefix}: Country is required unless omitted.")
-                if not site_omit.get("equipment", False) and not str(site.get("equipment", "")).strip():
-                    errors.append(f"{site_prefix}: Equipment is required unless omitted.")
-                if not site_omit.get("emission_source", False) and not str(site.get("emission_source", "")).strip():
-                    errors.append(f"{site_prefix}: Emission source is required unless omitted.")
-
-                try:
-                    if float(site.get("quantity", 0)) <= 0:
-                        errors.append(f"{site_prefix}: Quantity must be greater than zero.")
-                except (TypeError, ValueError):
-                    errors.append(f"{site_prefix}: Quantity must be a valid number.")
-
-                try:
-                    if float(site.get("unit_price", 0)) <= 0:
-                        errors.append(f"{site_prefix}: Unit price must be greater than zero.")
-                except (TypeError, ValueError):
-                    errors.append(f"{site_prefix}: Unit price must be a valid number.")
+                _validate_stationary_equipment_items(
+                    errors,
+                    site,
+                    site_prefix,
+                    equipment_label="Equipment",
+                    require_emission_source=True,
+                    document_type=document_type,
+                )
             elif document_type == "bems":
                 site_omit: dict = site.get("_omit", {})
                 if not str(site.get("label", "")).strip():
@@ -375,43 +487,19 @@ def validate_raw_config_stationary(raw_config: dict) -> list[str]:
                 site_omit: dict = site.get("_omit", {})
                 for field, label in [
                     ("label", "Site"),
-                    ("equipment", "Equipment"),
-                    ("fuel", "Fuel"),
-                    ("unit", "Unit"),
                 ]:
                     if not str(site.get(field, "")).strip():
                         errors.append(f"{site_prefix}: {label} is required.")
 
+                _validate_stationary_equipment_items(
+                    errors,
+                    site,
+                    site_prefix,
+                    equipment_label="Equipment",
+                    require_emission_source=True,
+                    document_type=document_type,
+                )
                 if not site_omit.get("country", False) and not str(site.get("country", "")).strip():
                     errors.append(f"{site_prefix}: Country is required unless omitted.")
-                if not site_omit.get("emission_source", False) and not str(site.get("emission_source", "")).strip():
-                    errors.append(f"{site_prefix}: Emission source is required unless omitted.")
-
-                try:
-                    if int(site.get("runs_per_month", 0)) <= 0:
-                        errors.append(f"{site_prefix}: Runs per month must be greater than zero.")
-                except (TypeError, ValueError):
-                    errors.append(f"{site_prefix}: Runs per month must be a whole number.")
-
-                try:
-                    if float(site.get("fuel_used_per_hour", 0)) <= 0:
-                        errors.append(f"{site_prefix}: Fuel used per hour must be greater than zero.")
-                except (TypeError, ValueError):
-                    errors.append(f"{site_prefix}: Fuel used per hour must be a valid number.")
-
-                try:
-                    min_hours = float(site.get("run_hours_min", 0))
-                    max_hours = float(site.get("run_hours_max", 0))
-                    if min_hours <= 0 or max_hours <= 0 or min_hours > max_hours:
-                        errors.append(f"{site_prefix}: Run hour bounds must be valid and increasing.")
-                except (TypeError, ValueError):
-                    errors.append(f"{site_prefix}: Run hour bounds must be valid numbers.")
-
-                if site.get("quantity_mode") == "tank_level_change":
-                    try:
-                        if float(site.get("tank_capacity", 0)) <= 0:
-                            errors.append(f"{site_prefix}: Tank capacity must be greater than zero.")
-                    except (TypeError, ValueError):
-                        errors.append(f"{site_prefix}: Tank capacity must be a valid number.")
 
     return errors

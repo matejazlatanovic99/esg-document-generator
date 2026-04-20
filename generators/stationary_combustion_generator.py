@@ -19,6 +19,8 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
+from components.stationary_combustion.units import default_fuel_volume_unit
+
 TWOPLACES = Decimal("0.01")
 PAGE_W, PAGE_H = A4
 _SPECIAL_CHARS_SUFFIX = ' & < " £ € \u00a0\u2014\u200f'
@@ -499,59 +501,143 @@ def _iter_company_sites(raw_config: dict):
             yield company_index, site_index, company, site
 
 
+def _site_equipment_items(raw_config: dict, site: dict, *, include_emission_source: bool) -> list[dict]:
+    site_omit = site.get("_omit", {})
+    equipment_omitted = bool(site_omit.get("equipment", False))
+    site_emission_source_omitted = bool(site_omit.get("emission_source", False))
+    raw_items = site.get("equipment_items")
+
+    if equipment_omitted:
+        raw_items = raw_items if isinstance(raw_items, list) and raw_items else []
+        first_item = raw_items[0] if raw_items else {}
+        if isinstance(first_item, dict):
+            first_emission_source = first_item.get("emission_source", site.get("emission_source", ""))
+            first_omit = first_item.get("_omit", {})
+        else:
+            first_emission_source = site.get("emission_source", "")
+            first_omit = {}
+        raw_item = dict(first_item) if isinstance(first_item, dict) else {}
+        raw_item.update({
+            "equipment": "",
+            "emission_source": first_emission_source,
+            "_omit": first_omit,
+        })
+        raw_items = [raw_item]
+
+    if not isinstance(raw_items, list) or not raw_items:
+        raw_items = [
+            {
+                "equipment": site.get("equipment", ""),
+                "emission_source": site.get("emission_source", ""),
+                "_omit": {"emission_source": site_emission_source_omitted},
+            }
+        ]
+
+    equipment_items: list[dict] = []
+    for raw_item in raw_items:
+        if isinstance(raw_item, str):
+            equipment = raw_item
+            emission_source = site.get("emission_source", "")
+            item_data: dict = {}
+            item_omit: dict = {}
+        else:
+            equipment = raw_item.get("equipment", raw_item.get("name", ""))
+            emission_source = raw_item.get("emission_source", site.get("emission_source", ""))
+            item_data = raw_item
+            item_omit = raw_item.get("_omit", {})
+
+        emission_source_omitted = site_emission_source_omitted or bool(item_omit.get("emission_source", False))
+        equipment_item_omitted = equipment_omitted or bool(item_omit.get("equipment", False))
+        normalized_item = {
+            "equipment": "" if equipment_item_omitted else _with_special_chars(raw_config, "" if equipment is None else str(equipment)),
+            "emission_source": ""
+            if not include_emission_source or emission_source_omitted
+            else _with_special_chars(raw_config, "" if emission_source is None else str(emission_source)),
+        }
+        for field in [
+            "fuel",
+            "unit",
+            "quantity",
+            "unit_price",
+            "delivery_charge",
+            "vat_rate",
+            "runs_per_month",
+            "fuel_used_per_hour",
+            "quantity_mode",
+            "tank_capacity",
+            "run_hours_min",
+            "run_hours_max",
+        ]:
+            if field in item_data:
+                normalized_item[field] = item_data.get(field)
+            elif field in site:
+                normalized_item[field] = site.get(field)
+        normalized_item.setdefault("unit", site.get("unit", default_fuel_volume_unit(raw_config.get("document_type"))))
+        normalized_item.setdefault("fuel", site.get("fuel", ""))
+        equipment_items.append(normalized_item)
+
+    return equipment_items or [{"equipment": "", "emission_source": ""}]
+
+
 def _build_fuel_invoice_records(raw_config: dict) -> list[dict]:
     fp = _financial_period(raw_config)
     records: list[dict] = []
     seed = int(raw_config.get("random_seed", 42))
 
     for company_index, site_index, company, site in _iter_company_sites(raw_config):
-        rng = random.Random(f"{seed}:fuel_invoice:{company_index}:{site_index}")
         site_omit = site.get("_omit", {})
-        quantity = _q2(_parse_decimal(site.get("quantity"), "0"))
-        unit_price = _q2(_parse_decimal(site.get("unit_price"), "0"))
-        delivery_charge = _q2(_parse_decimal(site.get("delivery_charge"), "0"))
-        vat_rate = _parse_decimal(site.get("vat_rate"), "20")
-        fuel_cost = _q2(quantity * unit_price)
-        subtotal = _q2(fuel_cost + delivery_charge)
-        vat = _q2(subtotal * vat_rate / Decimal("100"))
-        total = _q2(subtotal + vat)
-        invoice_date = fp["end_date"] + timedelta(days=rng.randint(2, 8))
-        invoice_no = (
-            f"{company.get('supplier_code', 'INV')}-{fp['start_date'].strftime('%Y%m')}"
-            f"-{company_index:02d}{site_index:02d}"
-        )
+        equipment_items = _site_equipment_items(raw_config, site, include_emission_source=True)
 
-        record = {
-            "company": _with_special_chars(raw_config, company.get("label", "")),
-            "supplier": _with_special_chars(raw_config, company.get("supplier", "")),
-            "supplier_address": [
-                _with_special_chars(raw_config, line) for line in company.get("supplier_address", [])
-            ],
-            "customer": _with_special_chars(raw_config, company.get("customer", "")),
-            "customer_code": company.get("customer_code", ""),
-            "site": _with_special_chars(raw_config, site.get("label", "")),
-            "site_address": [_with_special_chars(raw_config, line) for line in site.get("customer_address", [])],
-            "country": "" if site_omit.get("country", False) else _with_special_chars(raw_config, site.get("country", "")),
-            "equipment": "" if site_omit.get("equipment", False) else _with_special_chars(raw_config, site.get("equipment", "")),
-            "emission_source": "" if site_omit.get("emission_source", False) else _with_special_chars(raw_config, site.get("emission_source", "")),
-            "fuel": _with_special_chars(raw_config, site.get("fuel", "")),
-            "unit": site.get("unit", _tr(raw_config, "litres")),
-            "quantity": quantity,
-            "unit_price": unit_price,
-            "fuel_cost": fuel_cost,
-            "delivery_charge": delivery_charge,
-            "subtotal": subtotal,
-            "vat_rate": vat_rate,
-            "vat": vat,
-            "total": total,
-            "currency": company.get("currency", "GBP (£)"),
-            "invoice_no": invoice_no,
-            "invoice_date": invoice_date,
-            "period_label": fp["label"],
-            "period_start": fp["start_date"],
-            "period_end": fp["end_date"],
-        }
-        records.append(record)
+        for equipment_index, equipment_item in enumerate(equipment_items, start=1):
+            quantity = _q2(_parse_decimal(equipment_item.get("quantity"), "0"))
+            unit_price = _q2(_parse_decimal(equipment_item.get("unit_price"), "0"))
+            delivery_charge = _q2(_parse_decimal(equipment_item.get("delivery_charge"), "0"))
+            vat_rate = _parse_decimal(equipment_item.get("vat_rate"), "20")
+            fuel_cost = _q2(quantity * unit_price)
+            subtotal = _q2(fuel_cost + delivery_charge)
+            vat = _q2(subtotal * vat_rate / Decimal("100"))
+            total = _q2(subtotal + vat)
+            rng = random.Random(f"{seed}:fuel_invoice:{company_index}:{site_index}:{equipment_index}")
+            invoice_date = fp["end_date"] + timedelta(days=rng.randint(2, 8))
+            invoice_suffix = f"{company_index:02d}{site_index:02d}"
+            if len(equipment_items) > 1:
+                invoice_suffix = f"{invoice_suffix}-{equipment_index:02d}"
+            invoice_no = (
+                f"{company.get('supplier_code', 'INV')}-{fp['start_date'].strftime('%Y%m')}"
+                f"-{invoice_suffix}"
+            )
+
+            record = {
+                "company": _with_special_chars(raw_config, company.get("label", "")),
+                "supplier": _with_special_chars(raw_config, company.get("supplier", "")),
+                "supplier_address": [
+                    _with_special_chars(raw_config, line) for line in company.get("supplier_address", [])
+                ],
+                "customer": _with_special_chars(raw_config, company.get("customer", "")),
+                "customer_code": company.get("customer_code", ""),
+                "site": _with_special_chars(raw_config, site.get("label", "")),
+                "site_address": [_with_special_chars(raw_config, line) for line in site.get("customer_address", [])],
+                "country": "" if site_omit.get("country", False) else _with_special_chars(raw_config, site.get("country", "")),
+                "equipment": equipment_item["equipment"],
+                "emission_source": equipment_item["emission_source"],
+                "fuel": _with_special_chars(raw_config, equipment_item.get("fuel", "")),
+                "unit": equipment_item.get("unit", site.get("unit", _tr(raw_config, "litres"))),
+                "quantity": quantity,
+                "unit_price": unit_price,
+                "fuel_cost": fuel_cost,
+                "delivery_charge": delivery_charge,
+                "subtotal": subtotal,
+                "vat_rate": vat_rate,
+                "vat": vat,
+                "total": total,
+                "currency": company.get("currency", "GBP (£)"),
+                "invoice_no": invoice_no,
+                "invoice_date": invoice_date,
+                "period_label": fp["label"],
+                "period_start": fp["start_date"],
+                "period_end": fp["end_date"],
+            }
+            records.append(record)
     return records
 
 
@@ -562,37 +648,39 @@ def _build_delivery_note_records(raw_config: dict) -> list[dict]:
     days_in_period = max((fp["end_date"] - fp["start_date"]).days, 0)
 
     for company_index, site_index, company, site in _iter_company_sites(raw_config):
-        rng = random.Random(f"{seed}:delivery_note:{company_index}:{site_index}")
-        delivery_date = fp["start_date"] + timedelta(days=rng.randint(0, days_in_period))
-        note_no = (
-            f"DN-{delivery_date.strftime('%Y')}-"
-            f"{rng.randint(10000, 99999)}"
-        )
         site_omit = site.get("_omit", {})
-        equipment_omitted = bool(site_omit.get("equipment", False))
+        equipment_items = _site_equipment_items(raw_config, site, include_emission_source=False)
 
-        records.append({
-            "company": _with_special_chars(raw_config, company.get("label", "")),
-            "supplier": _with_special_chars(raw_config, company.get("supplier", "")),
-            "supplier_address": [
-                _with_special_chars(raw_config, line) for line in company.get("supplier_address", [])
-            ],
-            "customer": _with_special_chars(raw_config, company.get("customer", "")),
-            "site": _with_special_chars(raw_config, site.get("label", "")),
-            "site_address": [_with_special_chars(raw_config, line) for line in site.get("customer_address", [])],
-            "country": "" if site_omit.get("country", False) else _with_special_chars(raw_config, site.get("country", "")),
-            "equipment": "" if equipment_omitted else _with_special_chars(raw_config, site.get("equipment", "")),
-            "fuel": _with_special_chars(raw_config, site.get("fuel", "")),
-            "unit": site.get("unit", _tr(raw_config, "litres")),
-            "quantity": _q2(_parse_decimal(site.get("quantity"), "0")),
-            "delivery_note_no": note_no,
-            "delivery_date": delivery_date,
-            "driver_ref": f"TRK-{rng.randint(1, 24):02d}",
-            "customer_signature": _tr(raw_config, "received"),
-            "period_label": fp["label"],
-            "period_start": fp["start_date"],
-            "period_end": fp["end_date"],
-        })
+        for equipment_index, equipment_item in enumerate(equipment_items, start=1):
+            rng = random.Random(f"{seed}:delivery_note:{company_index}:{site_index}:{equipment_index}")
+            delivery_date = fp["start_date"] + timedelta(days=rng.randint(0, days_in_period))
+            note_no = (
+                f"DN-{delivery_date.strftime('%Y')}-"
+                f"{rng.randint(10000, 99999)}"
+            )
+
+            records.append({
+                "company": _with_special_chars(raw_config, company.get("label", "")),
+                "supplier": _with_special_chars(raw_config, company.get("supplier", "")),
+                "supplier_address": [
+                    _with_special_chars(raw_config, line) for line in company.get("supplier_address", [])
+                ],
+                "customer": _with_special_chars(raw_config, company.get("customer", "")),
+                "site": _with_special_chars(raw_config, site.get("label", "")),
+                "site_address": [_with_special_chars(raw_config, line) for line in site.get("customer_address", [])],
+                "country": "" if site_omit.get("country", False) else _with_special_chars(raw_config, site.get("country", "")),
+                "equipment": equipment_item["equipment"],
+                "fuel": _with_special_chars(raw_config, equipment_item.get("fuel", "")),
+                "unit": equipment_item.get("unit", site.get("unit", _tr(raw_config, "litres"))),
+                "quantity": _q2(_parse_decimal(equipment_item.get("quantity"), "0")),
+                "delivery_note_no": note_no,
+                "delivery_date": delivery_date,
+                "driver_ref": f"TRK-{rng.randint(1, 24):02d}",
+                "customer_signature": _tr(raw_config, "received"),
+                "period_label": fp["label"],
+                "period_start": fp["start_date"],
+                "period_end": fp["end_date"],
+            })
 
     return records
 
@@ -606,34 +694,34 @@ def _build_fuel_card_statements(raw_config: dict) -> list[dict]:
     for company_index, company in enumerate(raw_config.get("companies", []), start=1):
         transactions: list[dict] = []
         for transaction_index, site in enumerate(company.get("sites", []), start=1):
-            rng = random.Random(f"{seed}:fuel_card:{company_index}:{transaction_index}")
             site_omit = site.get("_omit", {})
-            quantity = _q2(_parse_decimal(site.get("quantity"), "0"))
-            unit_price = _q2(_parse_decimal(site.get("unit_price"), "0"))
-            transaction_date = fp["start_date"] + timedelta(days=rng.randint(0, days_in_period))
-            total = _q2(quantity * unit_price)
-
             site_value = "" if site_omit.get("label", False) else _with_special_chars(raw_config, site.get("label", ""))
-            equipment_value = "" if site_omit.get("equipment", False) else _with_special_chars(raw_config, site.get("equipment", ""))
-            emission_source_value = "" if site_omit.get("emission_source", False) else _with_special_chars(raw_config, site.get("emission_source", ""))
             country_value = "" if site_omit.get("country", False) else _with_special_chars(raw_config, site.get("country", ""))
-            reference_value = site_value or equipment_value or _tr(raw_config, "stationary_equipment")
+            equipment_items = _site_equipment_items(raw_config, site, include_emission_source=True)
 
-            transactions.append({
-                "card_number": site.get("card_number", ""),
-                "date": transaction_date,
-                "merchant": _with_special_chars(raw_config, site.get("merchant", "")),
-                "site": site_value,
-                "country": country_value,
-                "equipment": equipment_value,
-                "emission_source": emission_source_value,
-                "reference": reference_value,
-                "fuel": _with_special_chars(raw_config, site.get("fuel", "")),
-                "quantity": quantity,
-                "unit": site.get("unit", "L"),
-                "unit_price": unit_price,
-                "total": total,
-            })
+            for equipment_index, equipment_item in enumerate(equipment_items, start=1):
+                quantity = _q2(_parse_decimal(equipment_item.get("quantity"), "0"))
+                unit_price = _q2(_parse_decimal(equipment_item.get("unit_price"), "0"))
+                total = _q2(quantity * unit_price)
+                rng = random.Random(f"{seed}:fuel_card:{company_index}:{transaction_index}:{equipment_index}")
+                transaction_date = fp["start_date"] + timedelta(days=rng.randint(0, days_in_period))
+                reference_value = site_value or equipment_item["equipment"] or _tr(raw_config, "stationary_equipment")
+
+                transactions.append({
+                    "card_number": company.get("card_number") or site.get("card_number", ""),
+                    "date": transaction_date,
+                    "merchant": _with_special_chars(raw_config, company.get("merchant") or site.get("merchant", "")),
+                    "site": site_value,
+                    "country": country_value,
+                    "equipment": equipment_item["equipment"],
+                    "emission_source": equipment_item["emission_source"],
+                    "reference": reference_value,
+                    "fuel": _with_special_chars(raw_config, equipment_item.get("fuel", "")),
+                    "quantity": quantity,
+                    "unit": equipment_item.get("unit", site.get("unit", default_fuel_volume_unit("fuel_card"))),
+                    "unit_price": unit_price,
+                    "total": total,
+                })
 
         transactions.sort(key=lambda row: (row["date"], row["merchant"], row["card_number"]))
         statements.append({
@@ -672,64 +760,66 @@ def _build_generator_log_rows(raw_config: dict) -> list[dict]:
     seed = int(raw_config.get("random_seed", 42))
 
     for company_index, site_index, company, site in _iter_company_sites(raw_config):
-        rng = random.Random(f"{seed}:generator_log:{company_index}:{site_index}")
         site_omit = site.get("_omit", {})
-        runs_per_month = max(int(site.get("runs_per_month", 3)), 1)
-        tank_capacity = float(site.get("tank_capacity", 800))
-        burn_rate = float(site.get("fuel_used_per_hour", 15))
-        min_hours = float(site.get("run_hours_min", 0.5))
-        max_hours = max(float(site.get("run_hours_max", 4.0)), min_hours)
-        quantity_mode = site.get("quantity_mode", "tank_level_change")
+        equipment_items = _site_equipment_items(raw_config, site, include_emission_source=True)
 
-        for year, month in months:
-            days_in_month = monthrange(year, month)[1]
-            chosen_days = sorted(rng.sample(range(1, days_in_month + 1), k=min(runs_per_month, days_in_month)))
-            for day in chosen_days:
-                run_date = _date_within_month(year, month, day)
-                start_minutes = rng.choice([7 * 60, 8 * 60, 9 * 60, 13 * 60, 18 * 60])
-                run_hours = round(rng.uniform(min_hours, max_hours), 2)
-                end_minutes = start_minutes + int(run_hours * 60)
+        for equipment_index, equipment_item in enumerate(equipment_items, start=1):
+            runs_per_month = max(int(equipment_item.get("runs_per_month", 3)), 1)
+            tank_capacity = float(equipment_item.get("tank_capacity", 800))
+            burn_rate = float(equipment_item.get("fuel_used_per_hour", 15))
+            min_hours = float(equipment_item.get("run_hours_min", 0.5))
+            max_hours = max(float(equipment_item.get("run_hours_max", 4.0)), min_hours)
+            quantity_mode = equipment_item.get("quantity_mode", "tank_level_change")
+            rng = random.Random(f"{seed}:generator_log:{company_index}:{site_index}:{equipment_index}")
+            for year, month in months:
+                days_in_month = monthrange(year, month)[1]
+                chosen_days = sorted(rng.sample(range(1, days_in_month + 1), k=min(runs_per_month, days_in_month)))
+                for day in chosen_days:
+                    run_date = _date_within_month(year, month, day)
+                    start_minutes = rng.choice([7 * 60, 8 * 60, 9 * 60, 13 * 60, 18 * 60])
+                    run_hours = round(rng.uniform(min_hours, max_hours), 2)
+                    end_minutes = start_minutes + int(run_hours * 60)
 
-                if quantity_mode == "explicit_fuel_used":
-                    fuel_used = round(run_hours * burn_rate * rng.uniform(0.92, 1.12), 2)
-                    start_pct = float(rng.randint(52, 92))
-                    end_pct = max(0.0, start_pct - ((fuel_used / max(tank_capacity, 1.0)) * 100.0))
-                else:
-                    start_pct = float(rng.randint(55, 95))
-                    estimated_delta = max((run_hours * burn_rate / max(tank_capacity, 1.0)) * 100.0, 1.0)
-                    delta_pct = min(start_pct, estimated_delta * rng.uniform(0.9, 1.15))
-                    end_pct = max(0.0, start_pct - delta_pct)
-                    fuel_used = round((start_pct - end_pct) / 100.0 * tank_capacity, 2)
+                    if quantity_mode == "explicit_fuel_used":
+                        fuel_used = round(run_hours * burn_rate * rng.uniform(0.92, 1.12), 2)
+                        start_pct = float(rng.randint(52, 92))
+                        end_pct = max(0.0, start_pct - ((fuel_used / max(tank_capacity, 1.0)) * 100.0))
+                    else:
+                        start_pct = float(rng.randint(55, 95))
+                        estimated_delta = max((run_hours * burn_rate / max(tank_capacity, 1.0)) * 100.0, 1.0)
+                        delta_pct = min(start_pct, estimated_delta * rng.uniform(0.9, 1.15))
+                        end_pct = max(0.0, start_pct - delta_pct)
+                        fuel_used = round((start_pct - end_pct) / 100.0 * tank_capacity, 2)
 
-                rows.append({
-                    "company": _with_special_chars(raw_config, company.get("label", "")),
-                    "site": _with_special_chars(raw_config, site.get("label", "")),
-                    "country": "" if site_omit.get("country", False) else _with_special_chars(raw_config, site.get("country", "")),
-                    "equipment": _with_special_chars(raw_config, site.get("equipment", "")),
-                    "emission_source": "" if site_omit.get("emission_source", False) else _with_special_chars(raw_config, site.get("emission_source", "")),
-                    "fuel": _with_special_chars(raw_config, site.get("fuel", "")),
-                    "period": run_date.isoformat(),
-                    "date": run_date,
-                    "start_time": _format_time(start_minutes),
-                    "end_time": _format_time(end_minutes),
-                    "run_hours": run_hours,
-                    "start_fuel": _fmt_percent(start_pct),
-                    "end_fuel": _fmt_percent(end_pct),
-                    "fuel_used": round(fuel_used, 2),
-                    "unit": site.get("unit", "L"),
-                    "notes": _with_special_chars(
-                        raw_config,
-                        rng.choice(
-                            [
-                                _tr(raw_config, "test_run"),
-                                _tr(raw_config, "power_outage"),
-                                _tr(raw_config, "maintenance_test"),
-                                _tr(raw_config, "load_bank_test"),
-                            ]
+                    rows.append({
+                        "company": _with_special_chars(raw_config, company.get("label", "")),
+                        "site": _with_special_chars(raw_config, site.get("label", "")),
+                        "country": "" if site_omit.get("country", False) else _with_special_chars(raw_config, site.get("country", "")),
+                        "equipment": equipment_item["equipment"],
+                        "emission_source": equipment_item["emission_source"],
+                        "fuel": _with_special_chars(raw_config, equipment_item.get("fuel", "")),
+                        "period": run_date.isoformat(),
+                        "date": run_date,
+                        "start_time": _format_time(start_minutes),
+                        "end_time": _format_time(end_minutes),
+                        "run_hours": run_hours,
+                        "start_fuel": _fmt_percent(start_pct),
+                        "end_fuel": _fmt_percent(end_pct),
+                        "fuel_used": round(fuel_used, 2),
+                        "unit": equipment_item.get("unit", site.get("unit", default_fuel_volume_unit("generator_log"))),
+                        "notes": _with_special_chars(
+                            raw_config,
+                            rng.choice(
+                                [
+                                    _tr(raw_config, "test_run"),
+                                    _tr(raw_config, "power_outage"),
+                                    _tr(raw_config, "maintenance_test"),
+                                    _tr(raw_config, "load_bank_test"),
+                                ]
+                            ),
                         ),
-                    ),
-                })
-    return sorted(rows, key=lambda row: (row["site"], row["date"], row["start_time"]))
+                    })
+    return sorted(rows, key=lambda row: (row["site"], row["equipment"], row["date"], row["start_time"]))
 
 
 def _build_bems_site_blocks(raw_config: dict) -> list[dict]:
@@ -860,6 +950,8 @@ def _ground_truth_entries(raw_config: dict) -> list[dict]:
                 "Site": record["site"],
                 "Country": record["country"],
                 "Period": f"{record['period_start'].isoformat()} to {record['period_end'].isoformat()}",
+                "Equipment": record["equipment"],
+                "Emission source": record["emission_source"],
                 "Fuel": record["fuel"],
                 "Quantity": float(record["quantity"]),
                 "Unit": record["unit"],
@@ -1624,7 +1716,6 @@ def _log_headers(raw_config: dict) -> list[str]:
         _tr(raw_config, "company"),
         _tr(raw_config, "site"),
         _tr(raw_config, "country"),
-        _tr(raw_config, "period"),
         _tr(raw_config, "date"),
         _tr(raw_config, "start_time"),
         _tr(raw_config, "end_time"),
@@ -1665,7 +1756,6 @@ def generate_generator_log_xlsx(raw_config: dict) -> bytes:
             row["company"],
             row["site"],
             row["country"],
-            row["period"],
             row["date"].strftime("%d-%m-%y"),
             row["start_time"],
             row["end_time"],
@@ -1682,7 +1772,7 @@ def generate_generator_log_xlsx(raw_config: dict) -> bytes:
         for column_index, value in enumerate(values, start=1):
             sheet.cell(row=row_index, column=column_index, value=value)
 
-    widths = [18, 22, 18, 14, 12, 12, 12, 10, 12, 12, 10, 8, 20, 22, 18, 18]
+    widths = [18, 22, 18, 12, 12, 12, 10, 12, 12, 10, 8, 20, 22, 18, 18]
     for column_index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(column_index)].width = width
 
@@ -1701,7 +1791,6 @@ def generate_generator_log_csv(raw_config: dict) -> bytes:
             row["company"],
             row["site"],
             row["country"],
-            row["period"],
             row["date"].strftime("%d-%m-%y"),
             row["start_time"],
             row["end_time"],
