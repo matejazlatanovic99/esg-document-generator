@@ -385,7 +385,6 @@ def _data_cell(cell, value: Any, fmt: str | None = None, alt: bool = False, bold
 _DETAIL_COL_SPEC: list[tuple[str, int, str | None]] = [
     ("col_invoice_no",   20, None),
     ("col_company",      30, None),
-    ("col_currency",     10, None),
     ("col_site",         20, None),
     ("col_city",         14, None),
     ("col_postcode",     11, None),
@@ -407,6 +406,7 @@ _DETAIL_COL_SPEC: list[tuple[str, int, str | None]] = [
     ("col_subtotal",     16, "#,##0.00"),
     ("col_vat",          13, "#,##0.00"),
     ("col_total",        16, "#,##0.00"),
+    ("col_currency",     10, None),
 ]
 
 
@@ -529,10 +529,10 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
 
         summary_headers = [
             strings["xl_sum_company"],
-            strings["xl_col_currency"],
             strings["xl_sum_sites"],
             strings["xl_sum_qty"],
             strings["xl_sum_cost"],
+            strings["xl_col_currency"],
             strings["xl_sum_emissions_t"],
         ]
         header_row = 6
@@ -562,19 +562,19 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
 
             row_values = [
                 company_label,
-                currency_code(company_sections[0]["company"].get("currency")),
                 site_count,
                 float(total_qty),
                 float(total_cost),
+                currency_code(company_sections[0]["company"].get("currency")),
                 float(total_emissions),
             ]
             for col_idx, value in enumerate(row_values, start=1):
                 cell = summary.cell(data_row, col_idx, value)
                 cell.border = border
                 cell.font = Font(name="Calibri", size=9)
-                if col_idx in {3, 4}:
+                if col_idx in {2, 3}:
                     cell.number_format = "#,##0"
-                elif col_idx >= 5:
+                elif col_idx in {4, 6}:
                     cell.number_format = "#,##0.00"
             data_row += 1
             grand_qty += total_qty
@@ -584,10 +584,10 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
         grand_fill = PatternFill("solid", fgColor=f"{accent_r:02X}{accent_g:02X}{accent_b:02X}")
         grand_values = [
             strings["xl_sum_grand"],
-            "",
             len({section["site"]["_site_uid"] for section in sections}),
             float(grand_qty),
             float(grand_cost),
+            "",
             float(grand_emissions),
         ]
         for col_idx, value in enumerate(grand_values, start=1):
@@ -595,12 +595,12 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
             cell.fill = grand_fill
             cell.font = Font(name="Calibri", bold=True, color="FFFFFF", size=9)
             cell.border = border
-            if col_idx in {3}:
+            if col_idx in {2, 3}:
                 cell.number_format = "#,##0"
-            elif col_idx >= 4:
+            elif col_idx in {4, 6}:
                 cell.number_format = "#,##0.00"
 
-        for col_idx, width in enumerate([30, 10, 8, 18, 18, 14], start=1):
+        for col_idx, width in enumerate([30, 8, 18, 18, 10, 14], start=1):
             summary.column_dimensions[get_column_letter(col_idx)].width = width
 
         detail = workbook.create_sheet("Detail")
@@ -612,7 +612,6 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
     detail_headers = [
         strings["xl_col_ref"],
         strings["xl_col_company"],
-        strings["xl_col_currency"],
         strings["xl_col_site"],
         strings["xl_col_period"],
         strings["xl_col_city"],
@@ -624,6 +623,7 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
         strings["xl_col_end_read"],
         strings["xl_col_total_qty"],
         strings["xl_col_total_cost"],
+        strings["xl_col_currency"],
         strings["xl_col_emissions_kg"],
         strings["xl_col_emissions_t"],
     ]
@@ -649,7 +649,6 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
         row_values = [
             site["ref_no"],
             company["label"],
-            currency_code(company.get("currency")),
             site["label"],
             site["billing_period_label"],
             site["city"],
@@ -661,6 +660,7 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
             site["end_reading"],
             float(site["total_quantity"]),
             float(site["total_cost"]),
+            currency_code(company.get("currency")),
             float(site["emissions_kg"]),
             float(site["emissions_t"]),
         ]
@@ -677,7 +677,7 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
             else:
                 row_values += ["", "", "", ""]
 
-        numeric_cols = {9, 13, 14, 15, 16}
+        numeric_cols = {8, 12, 13, 15, 16}
         rate_cols = set()
         for idx in range(max_tariffs):
             base = 17 + idx * 4
@@ -691,7 +691,7 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
             if col_idx in numeric_cols and isinstance(value, float):
                 cell.number_format = "#,##0.0000" if col_idx in rate_cols else "#,##0.00"
 
-    base_widths = [30, 28, 10, 22, 18, 16, 10, 24, 16, 8, 14, 14, 14, 14, 16, 16]
+    base_widths = [30, 28, 22, 18, 16, 10, 24, 16, 8, 14, 14, 14, 14, 10, 16, 16]
     detail_widths = base_widths + [26, 12, 12, 12] * max_tariffs
     for col_idx, width in enumerate(detail_widths, start=1):
         detail.column_dimensions[get_column_letter(col_idx)].width = width
@@ -741,7 +741,6 @@ def _generate_smart_meter_xlsx(config: dict, sections: list[dict]) -> bytes:
     else:
         headers = [
             strings["xl_col_meter_id"],
-            strings["xl_col_currency"],
             strings["xl_col_site"],
             strings["xl_col_period"],
             strings["xl_col_start_read"],
@@ -750,8 +749,9 @@ def _generate_smart_meter_xlsx(config: dict, sections: list[dict]) -> bytes:
             strings["xl_col_unit"],
             strings["sm_col_tariff_type"],
             strings["xl_tariff_cost"],
+            strings["xl_col_currency"],
         ]
-        widths = [22, 10, 24, 18, 14, 14, 14, 10, 18, 12]
+        widths = [22, 24, 18, 14, 14, 14, 10, 18, 12, 10]
 
     for col_idx, header in enumerate(headers, start=1):
         _header_cell(ws.cell(row=1, column=col_idx), header, accent_fill)
@@ -778,7 +778,6 @@ def _generate_smart_meter_xlsx(config: dict, sections: list[dict]) -> bytes:
         else:
             row_values = [
                 (row["meter_id"], None),
-                (row["currency"], None),
                 (row["site_label"], None),
                 (row["period_label"], None),
                 (row["start_reading"], "#,##0"),
@@ -787,6 +786,7 @@ def _generate_smart_meter_xlsx(config: dict, sections: list[dict]) -> bytes:
                 (row["unit"], None),
                 (row["tariff_type"], None),
                 (row["cost"], "#,##0.00"),
+                (row["currency"], None),
             ]
 
         for col_idx, (value, fmt) in enumerate(row_values, start=1):
@@ -847,9 +847,9 @@ def _build_summary_sheet(ws, config: dict, sections: list[dict], accent: str, st
     # Company summary table
     tbl_row = 2 + len(meta) + 1
     summary_headers = [
-        strings["sum_company"], strings["sum_currency"], strings["sum_sites"], strings["sum_invoices"],
+        strings["sum_company"], strings["sum_sites"], strings["sum_invoices"],
         strings["sum_heat_cost"], strings["sum_cap_charge"],
-        strings["sum_subtotal"], strings["sum_vat"],     strings["sum_total"],
+        strings["sum_subtotal"], strings["sum_vat"],     strings["sum_total"], strings["sum_currency"],
     ]
     for col, h in enumerate(summary_headers, start=1):
         _header_cell(ws.cell(row=tbl_row, column=col), h, accent)
@@ -885,7 +885,6 @@ def _build_summary_sheet(ws, config: dict, sections: list[dict], accent: str, st
         alt = i % 2 == 1
         row_values = [
             (company,               None),
-            (t["currency"],         None),
             (len(t["sites"]),       "#,##0"),
             (t["invoices"],         "#,##0"),
             (float(t["heat_cost"]), money_fmt),
@@ -893,6 +892,7 @@ def _build_summary_sheet(ws, config: dict, sections: list[dict], accent: str, st
             (float(t["subtotal"]),  money_fmt),
             (float(t["vat"]),       money_fmt),
             (float(t["total"]),     money_fmt),
+            (t["currency"],         None),
         ]
         for col, (val, fmt) in enumerate(row_values, start=1):
             _data_cell(ws.cell(row=row, column=col), val, fmt=fmt, alt=alt)
@@ -902,13 +902,13 @@ def _build_summary_sheet(ws, config: dict, sections: list[dict], accent: str, st
     grand_values = [
         (strings["sum_grand"], None),
         ("",      None),
-        ("",      None),
         (sum(t["invoices"] for t in totals.values()), "#,##0"),
         (float(sum(t["heat_cost"]        for t in totals.values())), money_fmt),
         (float(sum(t["capacity_charge"]  for t in totals.values())), money_fmt),
         (float(sum(t["subtotal"]         for t in totals.values())), money_fmt),
         (float(sum(t["vat"]              for t in totals.values())), money_fmt),
         (float(sum(t["total"]            for t in totals.values())), money_fmt),
+        ("",      None),
     ]
     for col, (val, fmt) in enumerate(grand_values, start=1):
         c = ws.cell(row=grand_row, column=col, value=val)
@@ -920,7 +920,7 @@ def _build_summary_sheet(ws, config: dict, sections: list[dict], accent: str, st
             c.number_format = fmt
 
     # Column widths
-    for col, width in enumerate([30, 10, 8, 10, 20, 22, 18, 14, 20], start=1):
+    for col, width in enumerate([30, 8, 10, 20, 22, 18, 14, 20, 10], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
 
     ws.freeze_panes = "A2"
@@ -947,7 +947,6 @@ def _build_detail_sheet(ws, sections: list[dict], accent: str, blank_fields: set
             row_data: list[tuple[Any, str | None, str | None]] = [
                 (rec["invoice_no"],          "invoice_no",    None),
                 (company["label"],           "company_label", None),
-                (currency_code(company.get("currency")), "currency", None),
                 (site["label"],              "site_label",    None),
                 (rec["city"],                "city",          None),
                 (rec["postcode"],            "postcode",      None),
@@ -969,6 +968,7 @@ def _build_detail_sheet(ws, sections: list[dict], accent: str, blank_fields: set
                 (float(rec["subtotal"]),     "subtotal",      "#,##0.00"),
                 (float(rec["vat"]),          "vat",           "#,##0.00"),
                 (float(rec["total"]),        "total",         "#,##0.00"),
+                (currency_code(company.get("currency")), "currency", None),
             ]
             for col, (value, field_name, fmt) in enumerate(row_data, start=1):
                 cell_value = None if (field_name and field_name in blank_fields) else value

@@ -10,7 +10,7 @@ from datetime import date
 import streamlit as st
 
 from components.sidebar import get_document_type_config
-from utils.currency import currency_index, currency_options
+from utils.currency import currency_code, currency_index, currency_options
 
 _LANGUAGE_OPTIONS: dict[str, str] = {
     "English": "en",
@@ -162,6 +162,24 @@ def _smart_meter_consumption_default(idx: int) -> float:
     return float(round(rng.uniform(12_000.0, 95_000.0), 2))
 
 
+def _estimated_total_cost(total_quantity: float, meter_id: str, seed: int) -> float:
+    rng = random.Random(f"{seed}:{meter_id}:cost")
+    unit_rate = rng.uniform(0.22, 0.38)
+    return round(total_quantity * unit_rate, 2)
+
+
+def _smart_meter_total_cost_default(idx: int) -> float:
+    seed = int(st.session_state.get("doc_seed", 20260325))
+    meter_id = st.session_state.get(f"smart_meter_meter_id_{idx}", _default_meter_id(idx))
+    total_quantity = float(
+        st.session_state.get(
+            f"smart_meter_total_consumption_{idx}",
+            _smart_meter_consumption_default(idx),
+        )
+    )
+    return _estimated_total_cost(total_quantity, meter_id, seed)
+
+
 def _config_site(idx: int) -> dict:
     if not _SITES_CONFIG:
         return {}
@@ -268,10 +286,12 @@ def _render_meter_inputs() -> None:
     )
 
     granularity = st.session_state.get("smart_meter_data_granularity_label", "Monthly")
+    show_total_cost = granularity == "Monthly"
     for idx in range(int(meter_count)):
         meter_id = st.session_state.get(f"smart_meter_meter_id_{idx}", _default_meter_id(idx))
         with st.expander(f"Meter {idx + 1}: {meter_id}", expanded=(idx == 0)):
-            col1, col2 = st.columns(2)
+            meter_cols = st.columns(3 if show_total_cost else 2)
+            col1, col2 = meter_cols[:2]
             with col1:
                 st.text_input(
                     "Meter ID",
@@ -287,6 +307,26 @@ def _render_meter_inputs() -> None:
                     value=_smart_meter_consumption_default(idx),
                     key=f"smart_meter_total_consumption_{idx}",
                 )
+            if show_total_cost:
+                with meter_cols[2]:
+                    currency = currency_code(
+                        st.session_state.get("smart_meter_currency", _DEFAULT_COMPANY["currency"])
+                    )
+                    cost_omit_key = f"smart_meter_total_cost_{idx}_omit"
+                    st.number_input(
+                        f"Total Cost ({currency})",
+                        min_value=0.0,
+                        step=100.0,
+                        format="%.2f",
+                        value=_smart_meter_total_cost_default(idx),
+                        key=f"smart_meter_total_cost_{idx}",
+                        disabled=bool(st.session_state.get(cost_omit_key, False)),
+                    )
+                    st.checkbox(
+                        "Omit total cost",
+                        key=cost_omit_key,
+                        help="Leave currency and cost blank in monthly smart meter exports.",
+                    )
 
             if granularity == "Monthly":
                 site_key = f"smart_meter_site_label_{idx}"
@@ -307,12 +347,6 @@ def _render_meter_inputs() -> None:
 def _estimated_start_reading(meter_id: str, seed: int) -> int:
     raw = f"{seed}:{meter_id}".encode()
     return int(hashlib.sha1(raw).hexdigest()[:6], 16) % 900_000 + 50_000
-
-
-def _estimated_total_cost(total_quantity: float, meter_id: str, seed: int) -> float:
-    rng = random.Random(f"{seed}:{meter_id}:cost")
-    unit_rate = rng.uniform(0.22, 0.38)
-    return round(total_quantity * unit_rate, 2)
 
 
 def _collect_form_data(document_type: str | None) -> dict:
@@ -355,13 +389,19 @@ def _collect_form_data(document_type: str | None) -> dict:
             "unit": "kWh",
             "start_reading": _estimated_start_reading(meter_id, seed),
             "total_quantity": str(total_quantity),
-            "total_cost": str(_estimated_total_cost(total_quantity, meter_id, seed)),
+            "total_cost": str(
+                s.get(
+                    f"smart_meter_total_cost_{idx}",
+                    _estimated_total_cost(total_quantity, meter_id, seed),
+                )
+            ),
             "tariffs": tariffs,
             "_omit": {
                 "address": True,
                 "city": True,
                 "postcode": True,
                 "label": omit_site_label,
+                "total_cost": bool(s.get(f"smart_meter_total_cost_{idx}_omit", False)),
             },
         })
 

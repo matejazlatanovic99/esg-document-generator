@@ -55,6 +55,8 @@ _BEMS_REPORT_TYPES: dict[str, str] = {
     "Time-Series Trend Export": "time_series_trend_export",
 }
 
+_DOCUMENT_TYPES_WITH_CURRENCY = {"fuel_invoice", "fuel_card"}
+
 _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config")
 
 _STATIONARY_SUPPLIERS = [
@@ -860,7 +862,7 @@ def _render_company(i: int, document_type: str | None) -> None:
         customer_label = "Account Holder" if document_type == "fuel_card" else "Bill To / Customer"
         st.text_input(customer_label, value=_company_default(i, "customer", document_type=document_type), key=f"stationary_co_{i}_customer")
         st.text_input("Customer Code", value=_company_default(i, "customer_code", document_type=document_type), key=f"stationary_co_{i}_customer_code")
-        if document_type != "delivery_note":
+        if document_type in _DOCUMENT_TYPES_WITH_CURRENCY:
             st.selectbox(
                 "Currency",
                 options=_currency_options(),
@@ -1138,7 +1140,11 @@ def _collect_companies(document_type: str | None) -> list[dict]:
             ] if document_type != "fuel_card" else [],
             "customer": s.get(f"stationary_co_{i}_customer", ""),
             "customer_code": s.get(f"stationary_co_{i}_customer_code", ""),
-            "currency": s.get(f"stationary_co_{i}_currency", "GBP (£)"),
+            "currency": (
+                s.get(f"stationary_co_{i}_currency", "GBP (£)")
+                if document_type in _DOCUMENT_TYPES_WITH_CURRENCY
+                else ""
+            ),
             "merchant": s.get(f"stationary_co_{i}_merchant", ""),
             "card_number": s.get(f"stationary_co_{i}_card_number", ""),
             "sites": sites,

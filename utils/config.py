@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 
+_STATIONARY_DOCUMENT_TYPES_WITH_CURRENCY = {"fuel_invoice", "fuel_card"}
+
+
 def build_raw_config(
     form_data: dict,
     *,
@@ -82,6 +85,7 @@ def _validate_metered_scope_config(
     raw_config: dict,
     *,
     meter_label: str,
+    require_customer_address: bool = True,
     extra_site_validation: Callable[[str, dict, list[str]], None] | None = None,
 ) -> list[str]:
     errors = _validate_common_financial_period(raw_config)
@@ -133,7 +137,7 @@ def _validate_metered_scope_config(
                 else:
                     seen_meter_ids.add(meter_id)
 
-            if not site.get("customer_address"):
+            if require_customer_address and not site.get("customer_address"):
                 errors.append(f"{site_prefix}: Customer address is required.")
 
             if extra_site_validation is not None:
@@ -198,6 +202,7 @@ def validate_raw_config_electricity(raw_config: dict) -> list[str]:
     return _validate_metered_scope_config(
         raw_config,
         meter_label="Electricity Meter ID",
+        require_customer_address=raw_config.get("document_type") != "smart_meter_data",
         extra_site_validation=_validate_electricity_site,
     )
 
@@ -356,7 +361,7 @@ def validate_raw_config_stationary(raw_config: dict) -> list[str]:
             ("supplier_code", "Supplier code"),
             ("customer", "Customer name"),
         ]
-        if document_type != "delivery_note":
+        if document_type in _STATIONARY_DOCUMENT_TYPES_WITH_CURRENCY:
             required_company_fields.append(("currency", "Currency"))
 
         for field, label in required_company_fields:

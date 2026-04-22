@@ -1565,6 +1565,7 @@ def generate_fuel_card_docx(raw_config: dict) -> bytes:
             _tr(raw_config, "unit"),
             _tr(raw_config, "unit_price"),
             _tr(raw_config, "total"),
+            _tr(raw_config, "currency"),
         ]
         for cell, header in zip(table.rows[0].cells, headers):
             _shade_docx_cell(cell, "F5F8FB")
@@ -1630,6 +1631,7 @@ def generate_fuel_card_xlsx(raw_config: dict) -> bytes:
             _tr(raw_config, "unit"),
             _tr(raw_config, "unit_price"),
             _tr(raw_config, "total"),
+            _tr(raw_config, "currency"),
         ]
         header_fill = PatternFill(fill_type="solid", fgColor="1E5B88")
         for column_index, header in enumerate(headers, start=1):
@@ -1653,12 +1655,13 @@ def generate_fuel_card_xlsx(raw_config: dict) -> bytes:
                 transaction["unit"],
                 float(transaction["unit_price"]),
                 float(transaction["total"]),
+                statement["currency"].split()[0],
             ]
             for column_index, value in enumerate(values, start=1):
                 sheet.cell(row=row_index, column=column_index, value=value)
             row_index += 1
 
-        widths = [12, 12, 22, 18, 14, 18, 18, 14, 10, 8, 12, 12]
+        widths = [12, 12, 22, 18, 14, 18, 18, 14, 10, 8, 12, 12, 10]
         for column_index, width in enumerate(widths, start=1):
             sheet.column_dimensions[get_column_letter(column_index)].width = width
 
@@ -1693,6 +1696,7 @@ def generate_fuel_card_csv(raw_config: dict) -> bytes:
             _tr(raw_config, "unit"),
             _tr(raw_config, "unit_price"),
             _tr(raw_config, "total"),
+            _tr(raw_config, "currency"),
         ])
         for transaction in statement["transactions"]:
             writer.writerow([
@@ -1708,6 +1712,7 @@ def generate_fuel_card_csv(raw_config: dict) -> bytes:
                 transaction["unit"],
                 f"{float(transaction['unit_price']):.2f}",
                 f"{float(transaction['total']):.2f}",
+                statement["currency"].split()[0],
             ])
 
     return buffer.getvalue().encode("utf-8-sig")

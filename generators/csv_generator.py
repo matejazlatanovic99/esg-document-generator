@@ -246,7 +246,6 @@ ELECTRICITY_TRANSLATIONS: dict[str, dict[str, str]] = {
 _COLUMN_SPEC: list[tuple[str, Any]] = [
     ("col_invoice_no",   lambda co, si, r: r["invoice_no"]),
     ("col_company",      lambda co, si, r: co["label"]),
-    ("col_currency",     lambda co, si, r: currency_code(co.get("currency"))),
     ("col_site",         lambda co, si, r: si["label"]),
     ("col_city",         lambda co, si, r: r["city"]),
     ("col_postcode",     lambda co, si, r: r["postcode"]),
@@ -268,6 +267,7 @@ _COLUMN_SPEC: list[tuple[str, Any]] = [
     ("col_subtotal",     lambda co, si, r: _fmt_decimal(r["subtotal"], 2)),
     ("col_vat",          lambda co, si, r: _fmt_decimal(r["vat"], 2)),
     ("col_total",        lambda co, si, r: _fmt_decimal(r["total"], 2)),
+    ("col_currency",     lambda co, si, r: currency_code(co.get("currency"))),
 ]
 
 # Maps column header key → record field name for blank_fields checking
@@ -353,7 +353,6 @@ def _generate_electricity_csv(config: dict, sections: list[dict]) -> bytes:
     headers = [
         strings["xl_col_ref"],
         strings["xl_col_company"],
-        strings["xl_col_currency"],
         strings["xl_col_site"],
         strings["xl_col_period"],
         strings["meta_period_start"],
@@ -367,6 +366,7 @@ def _generate_electricity_csv(config: dict, sections: list[dict]) -> bytes:
         strings["xl_col_end_read"],
         strings["xl_col_total_qty"],
         strings["xl_col_total_cost"],
+        strings["xl_col_currency"],
         strings["xl_col_emissions_kg"],
         strings["xl_col_emissions_t"],
     ]
@@ -388,7 +388,6 @@ def _generate_electricity_csv(config: dict, sections: list[dict]) -> bytes:
         row = [
             site["ref_no"],
             company["label"],
-            currency_code(company.get("currency")),
             site["label"],
             site["billing_period_label"],
             period_start.strftime("%Y-%m-%d") if hasattr(period_start, "strftime") else str(period_start),
@@ -402,6 +401,7 @@ def _generate_electricity_csv(config: dict, sections: list[dict]) -> bytes:
             site["end_reading"],
             f"{float(site['total_quantity']):.2f}",
             f"{float(site['total_cost']):.2f}",
+            currency_code(company.get("currency")),
             f"{float(site['emissions_kg']):.2f}",
             f"{float(site['emissions_t']):.3f}",
         ]
@@ -468,7 +468,6 @@ def _generate_smart_meter_csv(config: dict, sections: list[dict]) -> bytes:
     else:
         writer.writerow([
             strings["xl_col_meter_id"],
-            strings["xl_col_currency"],
             strings["xl_col_site"],
             strings["xl_col_period"],
             strings["xl_col_start_read"],
@@ -477,11 +476,11 @@ def _generate_smart_meter_csv(config: dict, sections: list[dict]) -> bytes:
             strings["xl_col_unit"],
             strings["sm_col_tariff_type"],
             strings["xl_tariff_cost"],
+            strings["xl_col_currency"],
         ])
         for row in rows:
             writer.writerow([
                 row["meter_id"],
-                row["currency"],
                 row["site_label"],
                 row["period_label"],
                 row["start_reading"],
@@ -489,7 +488,8 @@ def _generate_smart_meter_csv(config: dict, sections: list[dict]) -> bytes:
                 f"{float(row['consumption']):.2f}",
                 row["unit"],
                 row["tariff_type"],
-                f"{float(row['cost']):.2f}",
+                "" if row["cost"] in ("", None) else f"{float(row['cost']):.2f}",
+                row["currency"],
             ])
 
     return buf.getvalue().encode("utf-8-sig")

@@ -115,12 +115,14 @@ def _monthly_smart_meter_rows(sections: list[dict]) -> list[dict]:
         start_reading = int(_to_kwh(site["start_reading"], unit))
         end_reading = int(_to_kwh(site["end_reading"], unit))
         tariffs = site.get("tariffs", [])
+        omit_cost = bool(site.get("_omit", {}).get("total_cost", False))
+        currency = "" if omit_cost else company.get("currency", "GBP (£)").split()[0]
 
         if tariffs:
             for tariff in tariffs:
                 rows.append({
                     "meter_id": site["meter_id"],
-                    "currency": company.get("currency", "GBP (£)").split()[0],
+                    "currency": currency,
                     "site_label": site["label"],
                     "period_label": site["billing_period_label"],
                     "start_reading": start_reading,
@@ -128,12 +130,12 @@ def _monthly_smart_meter_rows(sections: list[dict]) -> list[dict]:
                     "consumption": float(_q2(_to_kwh(tariff["quantity"], unit))),
                     "unit": normalized_unit,
                     "tariff_type": tariff["name"],
-                    "cost": float(_q2(tariff["cost"])),
+                    "cost": "" if omit_cost else float(_q2(tariff["cost"])),
                 })
         else:
             rows.append({
                 "meter_id": site["meter_id"],
-                "currency": company.get("currency", "GBP (£)").split()[0],
+                "currency": currency,
                 "site_label": site["label"],
                 "period_label": site["billing_period_label"],
                 "start_reading": start_reading,
@@ -141,7 +143,7 @@ def _monthly_smart_meter_rows(sections: list[dict]) -> list[dict]:
                 "consumption": float(_q2(_to_kwh(site["total_quantity"], unit))),
                 "unit": normalized_unit,
                 "tariff_type": "",
-                "cost": float(_q2(site["total_cost"])),
+                "cost": "" if omit_cost else float(_q2(site["total_cost"])),
             })
     return rows
 
