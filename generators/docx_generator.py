@@ -9,6 +9,8 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Inches, Pt, RGBColor
 
+from utils.currency import format_money, replace_pound_labels
+
 # ── translations ───────────────────────────────────────────────────────────────
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -373,8 +375,8 @@ def _q2(v) -> Decimal:
     return v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def _fmt_money(v) -> str:
-    return f"£{_q2(v):,.2f}"
+def _fmt_money(v, currency: str | None = "GBP (£)") -> str:
+    return format_money(_q2(v), currency)
 
 
 def _fmt_rate(v, places: int = 3) -> str:
@@ -397,6 +399,7 @@ def _render_invoice(
     strings: dict,
     omit: set[str],
 ) -> None:
+    strings = replace_pound_labels(strings, company.get("currency", "GBP (£)"))
     accent     = company["accent"]
     accent_soft = company["accent_soft"]
     accent_rgb = _hex_rgb(accent)
@@ -497,11 +500,11 @@ def _render_invoice(
 
     # ── 5. Charges summary ─────────────────────────────────────────────────────
     charge_rows: list[tuple[str, str, bool]] = [
-        (strings["charge_heat"],     _fmt_money(rec["heat_cost"]),       False),
-        (strings["charge_capacity"], _fmt_money(rec["capacity_charge"]), False),
-        (strings["charge_subtotal"], _fmt_money(rec["subtotal"]),        False),
-        (strings["charge_vat"],      _fmt_money(rec["vat"]),             False),
-        (strings["charge_total"],    _fmt_money(rec["total"]),           True),   # highlighted
+        (strings["charge_heat"],     _fmt_money(rec["heat_cost"], company.get("currency")),       False),
+        (strings["charge_capacity"], _fmt_money(rec["capacity_charge"], company.get("currency")), False),
+        (strings["charge_subtotal"], _fmt_money(rec["subtotal"], company.get("currency")),        False),
+        (strings["charge_vat"],      _fmt_money(rec["vat"], company.get("currency")),             False),
+        (strings["charge_total"],    _fmt_money(rec["total"], company.get("currency")),           True),   # highlighted
     ]
 
     ctbl = doc.add_table(rows=len(charge_rows) + 1, cols=2)

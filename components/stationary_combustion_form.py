@@ -36,15 +36,12 @@ from components.stationary_combustion.units import (
     default_fuel_volume_unit,
     option_index,
 )
-
-_CURRENCY_DISPLAY: dict[str, str] = {
-    "GBP": "GBP (£)",
-    "EUR": "EUR (€)",
-    "USD": "USD ($)",
-    "JPY": "JPY (¥)",
-    "DKK": "DKK (kr)",
-    "HUF": "HUF (Ft)",
-}
+from utils.currency import (
+    CURRENCY_DISPLAY as _CURRENCY_DISPLAY,
+    currency_code as _currency_code,
+    currency_index as _currency_index,
+    currency_options as _currency_options,
+)
 
 _LANGUAGE_OPTIONS: dict[str, str] = {
     "English": "en",
@@ -465,6 +462,14 @@ def _entry_delivery_charge_default(i: int, j: int, equipment_idx: int) -> float:
     return float(st.session_state.get("stationary_invoice_delivery_charge", 50.0))
 
 
+def _company_currency_code(i: int = 0, document_type: str | None = None) -> str:
+    selected = (
+        st.session_state.get(f"stationary_co_{i}_currency")
+        or _company_default(i, "currency", "GBP (£)", document_type=document_type)
+    )
+    return _currency_code(selected)
+
+
 def _entry_runs_per_month_default(i: int, j: int, equipment_idx: int) -> int:
     if _entry_default_is_randomized("generator_log", "runs_per_month"):
         return _entry_default_rng("generator_log", "runs_per_month", i, j, equipment_idx).randint(2, 5)
@@ -566,7 +571,7 @@ def _render_invoice_item_fields(prefix: str, i: int, j: int, equipment_idx: int)
     col1, col2, col3 = st.columns(3)
     with col1:
         st.number_input(
-            "Unit Price",
+            f"Unit Price ({_company_currency_code(i, 'fuel_invoice')})",
             min_value=0.01,
             step=0.01,
             format="%.2f",
@@ -578,7 +583,7 @@ def _render_invoice_item_fields(prefix: str, i: int, j: int, equipment_idx: int)
         )
     with col2:
         st.number_input(
-            "Delivery Charge",
+            f"Delivery Charge ({_company_currency_code(i, 'fuel_invoice')})",
             min_value=0.0,
             step=5.0,
             format="%.2f",
@@ -612,7 +617,7 @@ def _render_fuel_card_item_fields(prefix: str, i: int, j: int, equipment_idx: in
     _render_fuel_unit_quantity(prefix, i, j, "fuel_card", equipment_idx)
     unit_price_default = _entry_unit_price_default("fuel_card", i, j, equipment_idx)
     st.number_input(
-        "Unit Price",
+        f"Unit Price ({_company_currency_code(i, 'fuel_card')})",
         min_value=0.01,
         step=0.01,
         format="%.2f",
@@ -856,9 +861,17 @@ def _render_company(i: int, document_type: str | None) -> None:
         st.text_input(customer_label, value=_company_default(i, "customer", document_type=document_type), key=f"stationary_co_{i}_customer")
         st.text_input("Customer Code", value=_company_default(i, "customer_code", document_type=document_type), key=f"stationary_co_{i}_customer_code")
         if document_type != "delivery_note":
-            st.text_input(
+            st.selectbox(
                 "Currency",
-                value=_company_default(i, "currency", _CURRENCY_DISPLAY.get(NEW_COMPANY_PLACEHOLDER["currency"], "EUR (€)"), document_type=document_type),
+                options=_currency_options(),
+                index=_currency_index(
+                    _company_default(
+                        i,
+                        "currency",
+                        _CURRENCY_DISPLAY.get(NEW_COMPANY_PLACEHOLDER["currency"], "EUR (€)"),
+                        document_type=document_type,
+                    )
+                ),
                 key=f"stationary_co_{i}_currency",
             )
         if document_type == "fuel_card":

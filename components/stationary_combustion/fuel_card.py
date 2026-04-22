@@ -9,6 +9,11 @@ from components.stationary_combustion.units import (
     DEFAULT_COMPACT_FUEL_VOLUME_UNIT,
     option_index,
 )
+from utils.currency import currency_code
+
+
+def _default_currency_code() -> str:
+    return currency_code(st.session_state.get("stationary_co_0_currency", "GBP (£)"))
 
 
 def init_fuel_card_defaults(fuels: list[str]) -> None:
@@ -63,7 +68,7 @@ def render_fuel_card_defaults(fuels: list[str]) -> None:
             help="New equipment entries get an initial unit price in the fuel-card price range.",
         )
         st.number_input(
-            "Default Unit Price",
+            f"Default Unit Price ({_default_currency_code()})",
             min_value=0.01,
             step=0.01,
             format="%.2f",
@@ -110,7 +115,7 @@ def render_fuel_card_site_fields(i: int, j: int, site_default, fuels: list[str],
             key=f"stationary_site_{i}_{j}_quantity",
         )
         st.number_input(
-            "Unit Price",
+            f"Unit Price ({_default_currency_code()})",
             min_value=0.01,
             step=0.01,
             format="%.2f",

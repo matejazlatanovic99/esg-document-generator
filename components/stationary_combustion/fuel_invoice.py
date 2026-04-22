@@ -9,6 +9,11 @@ from components.stationary_combustion.units import (
     LONG_FUEL_VOLUME_UNITS,
     option_index,
 )
+from utils.currency import currency_code
+
+
+def _default_currency_code() -> str:
+    return currency_code(st.session_state.get("stationary_co_0_currency", "GBP (£)"))
 
 
 def init_invoice_defaults(fuels: list[str]) -> None:
@@ -66,7 +71,7 @@ def render_invoice_defaults(fuels: list[str]) -> None:
             help="New equipment entries get an initial unit price in the invoice price range.",
         )
         st.number_input(
-            "Default Unit Price",
+            f"Default Unit Price ({_default_currency_code()})",
             min_value=0.01,
             step=0.01,
             format="%.2f",
@@ -81,7 +86,7 @@ def render_invoice_defaults(fuels: list[str]) -> None:
             help="New equipment entries get an initial delivery charge in the invoice delivery range.",
         )
         st.number_input(
-            "Default Delivery Charge",
+            f"Default Delivery Charge ({_default_currency_code()})",
             min_value=0.0,
             step=5.0,
             format="%.2f",
@@ -119,7 +124,7 @@ def render_invoice_site_fields(i: int, j: int, site_default, fuels: list[str]) -
         )
     with col2:
         st.number_input(
-            "Unit Price",
+            f"Unit Price ({_default_currency_code()})",
             min_value=0.01,
             step=0.01,
             format="%.2f",
@@ -127,7 +132,7 @@ def render_invoice_site_fields(i: int, j: int, site_default, fuels: list[str]) -
             key=f"stationary_site_{i}_{j}_unit_price",
         )
         st.number_input(
-            "Delivery Charge",
+            f"Delivery Charge ({_default_currency_code()})",
             min_value=0.0,
             step=5.0,
             format="%.2f",

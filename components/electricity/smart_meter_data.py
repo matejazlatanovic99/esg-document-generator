@@ -10,6 +10,7 @@ from datetime import date
 import streamlit as st
 
 from components.sidebar import get_document_type_config
+from utils.currency import currency_index, currency_options
 
 _LANGUAGE_OPTIONS: dict[str, str] = {
     "English": "en",
@@ -219,6 +220,12 @@ def _render_data_settings() -> None:
                 key="smart_meter_timestamp_format_label",
             )
     else:
+        st.selectbox(
+            "Currency",
+            options=currency_options(),
+            index=currency_index(_DEFAULT_COMPANY["currency"]),
+            key="smart_meter_currency",
+        )
         st.caption("Monthly output includes one row per period and tariff type.")
 
 
@@ -358,7 +365,7 @@ def _collect_form_data(document_type: str | None) -> dict:
             },
         })
 
-    companies = [{**_DEFAULT_COMPANY, "sites": sites}]
+    companies = [{**_DEFAULT_COMPANY, "currency": s.get("smart_meter_currency", _DEFAULT_COMPANY["currency"]), "sites": sites}]
     fp_start: date = s.get("fp_start", date(2026, 1, 1))
     fp_end: date = s.get("fp_end", date(2026, 12, 31))
 

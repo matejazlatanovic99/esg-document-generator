@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 import os
 import random
@@ -12,6 +14,8 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
+
+from utils.currency import format_money, replace_pound_labels
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_COMPANY_STYLES = [
@@ -45,8 +49,8 @@ def q2(value):
     return value.quantize(TWOPLACES, rounding=ROUND_HALF_UP)
 
 
-def fmt_money(value):
-    return f"£{q2(value):,.2f}"
+def fmt_money(value, currency: str | None = "GBP (£)"):
+    return format_money(q2(value), currency)
 
 
 def fmt_rate(value, places=3):
@@ -752,15 +756,15 @@ def draw_table(c, x, y, w, rows, accent, accent_soft, strings, row_h=18):
     c.restoreState()
 
 
-def draw_amounts_box(c, x, y, w, h, rec, accent, accent_soft, strings):
+def draw_amounts_box(c, x, y, w, h, rec, accent, accent_soft, strings, currency):
     c.saveState()
     draw_info_box(c, x, y, w, h, strings["box_charges"], [], accent, accent_soft)
     lines = [
-        (strings["charge_heat"],     fmt_money(rec["heat_cost"])),
-        (strings["charge_capacity"], fmt_money(rec["capacity_charge"])),
-        (strings["charge_subtotal"], fmt_money(rec["subtotal"])),
-        (strings["charge_vat"],      fmt_money(rec["vat"])),
-        (strings["charge_total"],    fmt_money(rec["total"])),
+        (strings["charge_heat"],     fmt_money(rec["heat_cost"], currency)),
+        (strings["charge_capacity"], fmt_money(rec["capacity_charge"], currency)),
+        (strings["charge_subtotal"], fmt_money(rec["subtotal"], currency)),
+        (strings["charge_vat"],      fmt_money(rec["vat"], currency)),
+        (strings["charge_total"],    fmt_money(rec["total"], currency)),
     ]
     sy = y + h - 30
     for idx, (label, value) in enumerate(lines):
@@ -782,6 +786,7 @@ def draw_amounts_box(c, x, y, w, h, rec, accent, accent_soft, strings):
 
 
 def draw_billing_invoice(c, company, site, rec, page_no, total_pages, bg_path, fg_overlay_path, financial_period_label, strings, noise_level=1.0):
+    strings = replace_pound_labels(strings, company.get("currency", "GBP (£)"))
     accent = company["accent"]
     accent_soft = company["accent_soft"]
     margin = 32
@@ -835,7 +840,7 @@ def draw_billing_invoice(c, company, site, rec, page_no, total_pages, bg_path, f
     table_y = 171
     draw_table(c, margin, table_y, PAGE_W - margin * 2, fields, accent, accent_soft, strings, row_h=17)
 
-    draw_amounts_box(c, margin, 62, PAGE_W - margin * 2, 95, rec, accent, accent_soft, strings)
+    draw_amounts_box(c, margin, 62, PAGE_W - margin * 2, 95, rec, accent, accent_soft, strings, company.get("currency", "GBP (£)"))
 
     c.setStrokeColor(HexColor("#C9CDD2"))
     c.line(margin, 42, PAGE_W - margin, 42)

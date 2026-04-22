@@ -13,15 +13,13 @@ from components.electricity.electricity_bill import render_electricity_bill_form
 from components.electricity.smart_meter_data import render_smart_meter_data_form
 from components.electricity.supplier_portal_data import render_electricity_supplier_portal_data_form
 from components.sidebar import NEW_COMPANY_PLACEHOLDER, get_document_type_config
-
-_CURRENCY_DISPLAY: dict[str, str] = {
-    "GBP": "GBP (£)",
-    "EUR": "EUR (€)",
-    "USD": "USD ($)",
-    "JPY": "JPY (¥)",
-    "DKK": "DKK (kr)",
-    "HUF": "HUF (Ft)",
-}
+from utils.currency import (
+    CURRENCY_DISPLAY as _CURRENCY_DISPLAY,
+    currency_code as _currency_code,
+    currency_index as _currency_index,
+    currency_options as _currency_options,
+    currency_symbol as _currency_symbol,
+)
 
 _LANGUAGE_OPTIONS: dict[str, str] = {
     "English": "en",
@@ -417,6 +415,18 @@ def _field(widget_fn, label: str, key: str, omit_default: bool = False, **kwargs
         )
 
 
+def _elec_currency(i: int = 0) -> str:
+    return st.session_state.get(f"elec_co_{i}_currency") or _elec_co_default(i, "currency", "GBP (£)")
+
+
+def _elec_currency_code(i: int = 0) -> str:
+    return _currency_code(_elec_currency(i))
+
+
+def _elec_currency_symbol(i: int = 0) -> str:
+    return _currency_symbol(_elec_currency(i))
+
+
 def _render_electricity_global_config(document_type: str | None) -> None:
     _init_elec_global_random()
     st.session_state["elec_global_total_quantity_omit"] = False
@@ -477,14 +487,14 @@ def _render_electricity_global_config(document_type: str | None) -> None:
         )
         if _elec_site_field_can_be_omitted(document_type, "total_cost"):
             _field(
-                st.number_input, "Default Annual Cost", "elec_global_total_cost",
+                st.number_input, f"Default Annual Cost ({_elec_currency_code()})", "elec_global_total_cost",
                 value=float(gd["total_cost"]),
                 min_value=0.0, step=10.0, format="%.2f",
                 help="Total annual electricity cost used unless overridden per site.",
             )
         else:
             st.number_input(
-                "Default Annual Cost",
+                f"Default Annual Cost ({_elec_currency_code()})",
                 key="elec_global_total_cost",
                 value=float(gd["total_cost"]),
                 min_value=0.0,
@@ -548,12 +558,15 @@ def _render_electricity_company_form(i: int, fp_months: list[tuple[int, int]], d
     with col2:
         st.text_input("Customer Name", key=f"elec_co_{i}_customer", value=_elec_co_default(i, "customer"))
         st.text_input("Customer Code", key=f"elec_co_{i}_customer_code", value=_elec_co_default(i, "customer_code"))
+        st.selectbox(
+            "Currency",
+            options=_currency_options(),
+            index=_currency_index(
+                _elec_co_default(i, "currency", _CURRENCY_DISPLAY.get(NEW_COMPANY_PLACEHOLDER["currency"], "EUR (€)"))
+            ),
+            key=f"elec_co_{i}_currency",
+        )
         with st.expander("Advanced Options"):
-            st.text_input(
-                "Currency",
-                value=_elec_co_default(i, "currency", _CURRENCY_DISPLAY.get(NEW_COMPANY_PLACEHOLDER["currency"], "EUR (€)")),
-                key=f"elec_co_{i}_currency",
-            )
             st.color_picker("Accent Colour", value="#1E5B88", key=f"elec_co_{i}_accent")
 
     st.markdown(f"**Sites for Company {i + 1}**")
@@ -636,13 +649,13 @@ def _render_electricity_site_form(i: int, j: int, fp_months: list[tuple[int, int
             )
             if _elec_site_field_can_be_omitted(document_type, "total_cost"):
                 _field(
-                    st.number_input, "Annual Cost", f"elec_site_{i}_{j}_total_cost",
+                    st.number_input, f"Annual Cost ({_elec_currency_code(i)})", f"elec_site_{i}_{j}_total_cost",
                     value=float(_elec_site_override_val(i, j, "total_cost", 0.0)),
                     min_value=0.0, step=10.0, format="%.2f",
                 )
             else:
                 st.number_input(
-                    "Annual Cost",
+                    f"Annual Cost ({_elec_currency_code(i)})",
                     key=f"elec_site_{i}_{j}_total_cost",
                     value=float(_elec_site_override_val(i, j, "total_cost", 0.0)),
                     min_value=0.0,
@@ -652,7 +665,7 @@ def _render_electricity_site_form(i: int, j: int, fp_months: list[tuple[int, int
         else:
             g_qty = st.session_state.get("elec_global_total_quantity", _ELECTRICITY_GLOBAL_DEFAULTS["total_quantity"])
             g_cost = st.session_state.get("elec_global_total_cost", _ELECTRICITY_GLOBAL_DEFAULTS["total_cost"])
-            st.caption(f"Using global defaults — {float(g_qty):,.0f} kWh, £{float(g_cost):,.2f}.")
+            st.caption(f"Using global defaults — {float(g_qty):,.0f} kWh, {_elec_currency_symbol(i)}{float(g_cost):,.2f}.")
 
     session = st.session_state
     global_n_tariffs = int(session.get("elec_global_n_tariffs", len(_ELECTRICITY_GLOBAL_DEFAULTS["tariffs"])))

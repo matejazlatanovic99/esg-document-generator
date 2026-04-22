@@ -6,6 +6,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from utils.currency import currency_code
+
 # ── translations ───────────────────────────────────────────────────────────────
 # Reuses the same column-header keys as the XLSX generator.
 
@@ -13,6 +15,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
         "col_invoice_no":   "Invoice No",
         "col_company":      "Company",
+        "col_currency":     "Currency",
         "col_site":         "Site",
         "col_city":         "City",
         "col_postcode":     "Postcode",
@@ -38,6 +41,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "fr": {
         "col_invoice_no":   "N° de facture",
         "col_company":      "Entreprise",
+        "col_currency":     "Devise",
         "col_site":         "Site",
         "col_city":         "Ville",
         "col_postcode":     "Code postal",
@@ -63,6 +67,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "de": {
         "col_invoice_no":   "Rechnungsnr.",
         "col_company":      "Unternehmen",
+        "col_currency":     "Währung",
         "col_site":         "Standort",
         "col_city":         "Stadt",
         "col_postcode":     "Postleitzahl",
@@ -88,6 +93,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "nl": {
         "col_invoice_no":   "Factuurnr.",
         "col_company":      "Bedrijf",
+        "col_currency":     "Valuta",
         "col_site":         "Locatie",
         "col_city":         "Stad",
         "col_postcode":     "Postcode",
@@ -116,6 +122,7 @@ ELECTRICITY_TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
         "xl_col_ref": "Reference",
         "xl_col_company": "Company",
+        "xl_col_currency": "Currency",
         "xl_col_site": "Site",
         "xl_col_period": "Billing Period",
         "meta_period_start": "Period Start",
@@ -145,6 +152,7 @@ ELECTRICITY_TRANSLATIONS: dict[str, dict[str, str]] = {
     "fr": {
         "xl_col_ref": "R\u00e9f\u00e9rence",
         "xl_col_company": "Entreprise",
+        "xl_col_currency": "Devise",
         "xl_col_site": "Site",
         "xl_col_period": "P\u00e9riode de facturation",
         "meta_period_start": "D\u00e9but de p\u00e9riode",
@@ -174,6 +182,7 @@ ELECTRICITY_TRANSLATIONS: dict[str, dict[str, str]] = {
     "de": {
         "xl_col_ref": "Referenz",
         "xl_col_company": "Unternehmen",
+        "xl_col_currency": "Währung",
         "xl_col_site": "Standort",
         "xl_col_period": "Abrechnungszeitraum",
         "meta_period_start": "Zeitraum Beginn",
@@ -203,6 +212,7 @@ ELECTRICITY_TRANSLATIONS: dict[str, dict[str, str]] = {
     "nl": {
         "xl_col_ref": "Referentie",
         "xl_col_company": "Bedrijf",
+        "xl_col_currency": "Valuta",
         "xl_col_site": "Locatie",
         "xl_col_period": "Facturatieperiode",
         "meta_period_start": "Periode begin",
@@ -236,6 +246,7 @@ ELECTRICITY_TRANSLATIONS: dict[str, dict[str, str]] = {
 _COLUMN_SPEC: list[tuple[str, Any]] = [
     ("col_invoice_no",   lambda co, si, r: r["invoice_no"]),
     ("col_company",      lambda co, si, r: co["label"]),
+    ("col_currency",     lambda co, si, r: currency_code(co.get("currency"))),
     ("col_site",         lambda co, si, r: si["label"]),
     ("col_city",         lambda co, si, r: r["city"]),
     ("col_postcode",     lambda co, si, r: r["postcode"]),
@@ -289,6 +300,15 @@ def _fmt_decimal(value, places: int) -> str:
     return str(value.quantize(quantizer))
 
 
+def _currency_label_for_sections(sections: list[dict]) -> str:
+    codes = {currency_code(section["company"].get("currency")) for section in sections}
+    return next(iter(codes)) if len(codes) == 1 else "Currency"
+
+
+def _replace_currency_labels(strings: dict[str, str], currency_label: str) -> dict[str, str]:
+    return {key: value.replace("£", currency_label) for key, value in strings.items()}
+
+
 def _generate_heat_csv(
     config: dict,
     sections: list[dict],
@@ -296,7 +316,7 @@ def _generate_heat_csv(
 ) -> bytes:
     """Build a UTF-8 CSV of billing detail rows and return bytes."""
     lang = config["document"].get("language", "en")
-    strings = TRANSLATIONS.get(lang, TRANSLATIONS["en"])
+    strings = _replace_currency_labels(TRANSLATIONS.get(lang, TRANSLATIONS["en"]), _currency_label_for_sections(sections))
     omit = blank_fields or set()
 
     headers = [strings[key] for key, _ in _COLUMN_SPEC]
@@ -333,6 +353,7 @@ def _generate_electricity_csv(config: dict, sections: list[dict]) -> bytes:
     headers = [
         strings["xl_col_ref"],
         strings["xl_col_company"],
+        strings["xl_col_currency"],
         strings["xl_col_site"],
         strings["xl_col_period"],
         strings["meta_period_start"],
@@ -367,6 +388,7 @@ def _generate_electricity_csv(config: dict, sections: list[dict]) -> bytes:
         row = [
             site["ref_no"],
             company["label"],
+            currency_code(company.get("currency")),
             site["label"],
             site["billing_period_label"],
             period_start.strftime("%Y-%m-%d") if hasattr(period_start, "strftime") else str(period_start),
@@ -446,6 +468,7 @@ def _generate_smart_meter_csv(config: dict, sections: list[dict]) -> bytes:
     else:
         writer.writerow([
             strings["xl_col_meter_id"],
+            strings["xl_col_currency"],
             strings["xl_col_site"],
             strings["xl_col_period"],
             strings["xl_col_start_read"],
@@ -458,6 +481,7 @@ def _generate_smart_meter_csv(config: dict, sections: list[dict]) -> bytes:
         for row in rows:
             writer.writerow([
                 row["meter_id"],
+                row["currency"],
                 row["site_label"],
                 row["period_label"],
                 row["start_reading"],

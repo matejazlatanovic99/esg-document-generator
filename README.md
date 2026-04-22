@@ -106,7 +106,7 @@ The Purchased Heat form maps to the following configuration schema:
 | Supplier Address | Supplier address, one line per row |
 | Customer Name | Customer entity printed on invoices |
 | Customer Code | Short code used in invoice numbers |
-| Currency *(advanced)* | Currency label, e.g. `GBP (£)` |
+| Currency | Currency selected for price fields and generated exports, e.g. `GBP (£)` |
 | Accent Colour *(advanced)* | Hex colour used for invoice styling |
 
 ### Site fields
@@ -119,9 +119,9 @@ The Purchased Heat form maps to the following configuration schema:
 | Postcode | Postcode / ZIP for the site |
 | Heat Meter ID | Unique meter identifier printed on invoices |
 | Contracted Capacity (kW) | Capacity charge basis, 50–500 kW |
-| Capacity Rate (£/kW/month) | Rate per kW of contracted capacity |
+| Capacity Rate (`currency`/kW/month) | Rate per kW of contracted capacity |
 | Base Monthly Consumption (kWh) | Average monthly consumption, used with seasonal factors |
-| Base Unit Price (£/kWh) | Starting heat unit price before seasonal adjustments |
+| Base Unit Price (`currency`/kWh) | Starting heat unit price before seasonal adjustments |
 | Start Meter Reading (kWh) | Opening meter value for the first billing period |
 | Billing Periods | Full financial period (auto) or custom month selection |
 

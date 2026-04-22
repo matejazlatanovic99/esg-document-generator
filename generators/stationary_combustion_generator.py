@@ -1480,6 +1480,7 @@ def generate_fuel_card_pdf(raw_config: dict) -> bytes:
             row_y = table_top - 18
             c.setFillColor(colors.black)
             c.setFont("Helvetica", 7.5)
+            currency_symbol = _currency_symbol(statement["currency"])
             for transaction in transactions[page_start:page_start + page_size]:
                 c.rect(table_x, row_y, sum(column_widths), 18, fill=0, stroke=1)
                 cursor = table_x + 4
@@ -1491,8 +1492,8 @@ def generate_fuel_card_pdf(raw_config: dict) -> bytes:
                     transaction["fuel"],
                     _fmt_money(transaction["quantity"]),
                     transaction["unit"],
-                    _fmt_money(transaction["unit_price"]),
-                    _fmt_money(transaction["total"]),
+                    f"{currency_symbol}{_fmt_money(transaction['unit_price'])}",
+                    f"{currency_symbol}{_fmt_money(transaction['total'])}",
                 ]
                 for value, width in zip(row_values, column_widths):
                     c.drawString(cursor, row_y + 5, str(value))
@@ -1502,7 +1503,7 @@ def generate_fuel_card_pdf(raw_config: dict) -> bytes:
             if page_start + page_size >= len(transactions):
                 c.setFont("Helvetica-Bold", 10)
                 c.drawRightString(PAGE_W - 180, row_y - 18, _tr(raw_config, "statement_total"))
-                c.drawRightString(PAGE_W - 48, row_y - 18, _fmt_money(statement["statement_total"]))
+                c.drawRightString(PAGE_W - 48, row_y - 18, f"{currency_symbol}{_fmt_money(statement['statement_total'])}")
 
             c.setFont("Helvetica", 8)
             c.setFillColor(colors.grey)
@@ -1569,6 +1570,7 @@ def generate_fuel_card_docx(raw_config: dict) -> bytes:
             _shade_docx_cell(cell, "F5F8FB")
             _set_docx_cell_text(cell, header, bold=True)
 
+        currency_symbol = _currency_symbol(statement["currency"])
         for transaction in statement["transactions"]:
             row = table.add_row().cells
             values = [
@@ -1579,8 +1581,8 @@ def generate_fuel_card_docx(raw_config: dict) -> bytes:
                 transaction["fuel"],
                 _fmt_money(transaction["quantity"]),
                 transaction["unit"],
-                _fmt_money(transaction["unit_price"]),
-                _fmt_money(transaction["total"]),
+                f"{currency_symbol}{_fmt_money(transaction['unit_price'])}",
+                f"{currency_symbol}{_fmt_money(transaction['total'])}",
             ]
             for cell, value in zip(row, values):
                 _set_docx_cell_text(cell, str(value))
@@ -1589,7 +1591,7 @@ def generate_fuel_card_docx(raw_config: dict) -> bytes:
         totals.style = "Table Grid"
         _shade_docx_cell(totals.cell(0, 0), "F5F8FB")
         _set_docx_cell_text(totals.cell(0, 0), _tr(raw_config, "statement_total"), bold=True)
-        _set_docx_cell_text(totals.cell(0, 1), _fmt_money(statement["statement_total"]), bold=True)
+        _set_docx_cell_text(totals.cell(0, 1), f"{currency_symbol}{_fmt_money(statement['statement_total'])}", bold=True)
 
         if statement_index < len(statements) - 1:
             document.add_page_break()

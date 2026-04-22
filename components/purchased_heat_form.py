@@ -12,15 +12,12 @@ import streamlit as st
 from components.purchased_heat.supplier_portal_data import render_supplier_portal_data_form
 from components.purchased_heat.utility_bill import render_utility_bill_form
 from components.sidebar import NEW_COMPANY_PLACEHOLDER, get_document_type_config
-
-_CURRENCY_DISPLAY: dict[str, str] = {
-    "GBP": "GBP (£)",
-    "EUR": "EUR (€)",
-    "USD": "USD ($)",
-    "JPY": "JPY (¥)",
-    "DKK": "DKK (kr)",
-    "HUF": "HUF (Ft)",
-}
+from utils.currency import (
+    CURRENCY_DISPLAY as _CURRENCY_DISPLAY,
+    currency_code as _currency_code,
+    currency_index as _currency_index,
+    currency_options as _currency_options,
+)
 
 _LANGUAGE_OPTIONS: dict[str, str] = {
     "English": "en",
@@ -246,7 +243,7 @@ def _render_heat_global_config(document_type: str | None) -> None:
             help="Default contracted capacity applied to all sites.",
         )
         st.number_input(
-            "Capacity Rate (£/kW/month)",
+            f"Capacity Rate ({_heat_currency_code()}/kW/month)",
             key="heat_global_capacity_rate",
             value=float(gd["capacity_rate"]),
             min_value=0.01,
@@ -266,7 +263,7 @@ def _render_heat_global_config(document_type: str | None) -> None:
         )
     with col2:
         st.number_input(
-            "Base Unit Price (£/kWh)",
+            f"Base Unit Price ({_heat_currency_code()}/kWh)",
             key="heat_global_unit_price_base",
             value=float(gd["unit_price_base"]),
             min_value=0.010,
@@ -406,6 +403,15 @@ def _heat_site_override_val(i: int, j: int, field: str, fallback=None):
     return val
 
 
+def _heat_currency_code(currency: str | None = None) -> str:
+    selected = currency or st.session_state.get("co_0_currency") or _co_default(0, "currency", "GBP (£)")
+    return _currency_code(selected)
+
+
+def _heat_company_currency_code(i: int) -> str:
+    return _heat_currency_code(st.session_state.get(f"co_{i}_currency") or _co_default(i, "currency", "GBP (£)"))
+
+
 def _field(widget_fn, label: str, key: str, omit_default: bool = False, **kwargs) -> None:
     is_omitted: bool = st.session_state.get(f"{key}_omit", omit_default)
     field_col, omit_col = st.columns([8, 1])
@@ -451,12 +457,15 @@ def _render_company_form(i: int, fp_months: list[tuple[int, int]], document_type
     with col2:
         st.text_input("Customer Name", key=f"co_{i}_customer", value=_co_default(i, "customer"))
         st.text_input("Customer Code", key=f"co_{i}_customer_code", value=_co_default(i, "customer_code"))
+        st.selectbox(
+            "Currency",
+            options=_currency_options(),
+            index=_currency_index(
+                _co_default(i, "currency", _CURRENCY_DISPLAY.get(NEW_COMPANY_PLACEHOLDER["currency"], "EUR (€)"))
+            ),
+            key=f"co_{i}_currency",
+        )
         with st.expander("Advanced Options"):
-            st.text_input(
-                "Currency",
-                value=_co_default(i, "currency", _CURRENCY_DISPLAY.get(NEW_COMPANY_PLACEHOLDER["currency"], "EUR (€)")),
-                key=f"co_{i}_currency",
-            )
             st.color_picker("Accent Colour", value="#1E5B88", key=f"co_{i}_accent")
 
     st.markdown(f"**Sites for Company {i + 1}**")
@@ -493,9 +502,9 @@ def _render_site_form(i: int, j: int, fp_months: list[tuple[int, int]], document
         )
         if override:
             st.number_input("Contracted Capacity (kW)", key=f"site_{i}_{j}_capacity_kw", min_value=10, max_value=2000, step=5, value=int(_heat_site_override_val(i, j, "capacity_kw", 150)))
-            st.number_input("Capacity Rate (£/kW/month)", key=f"site_{i}_{j}_capacity_rate", min_value=0.01, max_value=50.0, step=0.05, format="%.2f", value=float(_heat_site_override_val(i, j, "capacity_rate", 5.50)))
+            st.number_input(f"Capacity Rate ({_heat_company_currency_code(i)}/kW/month)", key=f"site_{i}_{j}_capacity_rate", min_value=0.01, max_value=50.0, step=0.05, format="%.2f", value=float(_heat_site_override_val(i, j, "capacity_rate", 5.50)))
             st.number_input("Base Monthly Consumption (kWh)", key=f"site_{i}_{j}_base_consumption", min_value=100, max_value=500_000, step=100, value=int(_heat_site_override_val(i, j, "base_consumption", 15000)))
-            st.number_input("Base Unit Price (£/kWh)", key=f"site_{i}_{j}_unit_price_base", min_value=0.010, max_value=0.500, step=0.001, format="%.3f", value=float(_heat_site_override_val(i, j, "unit_price_base", 0.070)))
+            st.number_input(f"Base Unit Price ({_heat_company_currency_code(i)}/kWh)", key=f"site_{i}_{j}_unit_price_base", min_value=0.010, max_value=0.500, step=0.001, format="%.3f", value=float(_heat_site_override_val(i, j, "unit_price_base", 0.070)))
             if _heat_field_can_be_omitted(document_type, "start_reading"):
                 _field(st.number_input, "Start Meter Reading (kWh)", f"site_{i}_{j}_start_reading", min_value=0, max_value=9_999_999, step=1000, value=int(_heat_site_override_val(i, j, "start_reading", 400000)))
             else:

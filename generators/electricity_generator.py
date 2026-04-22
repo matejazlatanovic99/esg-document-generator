@@ -14,6 +14,7 @@ from generators.shared_generator import (
     invoice_suffix,
     normalize_billing_periods,
 )
+from utils.currency import currency_symbol
 
 TWOPLACES = Decimal("0.01")
 FOURPLACES = Decimal("0.0001")
@@ -35,14 +36,6 @@ def _q4(value) -> Decimal:
     if not isinstance(value, Decimal):
         value = Decimal(str(value))
     return value.quantize(FOURPLACES, rounding=ROUND_HALF_UP)
-
-
-def _currency_symbol(currency_raw: str) -> str:
-    mapping = {"(£)": "£", "(€)": "€", "($)": "$", "(¥)": "¥", "(kr)": "kr", "(Ft)": "Ft"}
-    for token, sym in mapping.items():
-        if token in currency_raw:
-            return sym
-    return ""
 
 
 def _to_kwh(value, unit: str) -> Decimal:
@@ -115,6 +108,7 @@ def _distribute_interval_values(total_kwh: Decimal, timestamps: list[datetime], 
 def _monthly_smart_meter_rows(sections: list[dict]) -> list[dict]:
     rows: list[dict] = []
     for section in sections:
+        company = section["company"]
         site = section["site"]
         unit = site.get("unit", "kWh")
         normalized_unit = "kWh"
@@ -126,6 +120,7 @@ def _monthly_smart_meter_rows(sections: list[dict]) -> list[dict]:
             for tariff in tariffs:
                 rows.append({
                     "meter_id": site["meter_id"],
+                    "currency": company.get("currency", "GBP (£)").split()[0],
                     "site_label": site["label"],
                     "period_label": site["billing_period_label"],
                     "start_reading": start_reading,
@@ -138,6 +133,7 @@ def _monthly_smart_meter_rows(sections: list[dict]) -> list[dict]:
         else:
             rows.append({
                 "meter_id": site["meter_id"],
+                "currency": company.get("currency", "GBP (£)").split()[0],
                 "site_label": site["label"],
                 "period_label": site["billing_period_label"],
                 "start_reading": start_reading,
@@ -347,7 +343,7 @@ def normalize_site(company: dict, site: dict, financial_period: dict) -> dict:
     period_start = financial_period["start_date"]
     base_ref_no = f"{company['supplier_code']}-{company['customer_code']}-ELEC-{period_start.year}"
 
-    symbol = _currency_symbol(company.get("currency", "GBP (£)"))
+    symbol = currency_symbol(company.get("currency", "GBP (£)"))
     site_uid = f"{company['label']}|{raw_label or site.get('meter_id', '?')}"
     rng_site = random.Random(hash(site_uid) & 0xFFFFFFFF)
 
