@@ -9,6 +9,17 @@ from datetime import date
 
 import streamlit as st
 
+from components.distractor_fields_controls import (
+    collect_distractor_field_form_data as _collect_distractor_fields,
+)
+from components.invalid_data_controls import (
+    collect_invalid_data_form_data as _collect_invalid_data,
+    render_invalid_data_controls as _render_invalid_data_controls,
+)
+from components.layout_controls import (
+    collect_layout_form_data as _collect_layout,
+    render_layout_controls as _render_layout_controls,
+)
 from components.sidebar import get_document_type_config
 from utils.currency import currency_code, currency_index, currency_options
 
@@ -142,6 +153,10 @@ def _render_document_settings(category: str, document_type: str | None) -> None:
             key="doc_inject_special_chars",
             help="Append QA characters to generated text values.",
         )
+
+        _render_layout_controls()
+        st.divider()
+        _render_invalid_data_controls()
 
 
 def _init_smart_meter_defaults() -> None:
@@ -340,6 +355,7 @@ def _render_meter_inputs() -> None:
                     st.text_input,
                     "Site",
                     site_key,
+                    omit_default=True,
                     help="Site label shown in monthly smart meter output.",
                 )
 
@@ -371,10 +387,7 @@ def _collect_form_data(document_type: str | None) -> dict:
         meter_id = s.get(f"smart_meter_meter_id_{idx}", "").strip() or _default_meter_id(idx)
         total_quantity = float(s.get(f"smart_meter_total_consumption_{idx}", 0.0))
         if granularity == "monthly":
-            site_label = (
-                s.get(f"smart_meter_site_label_{idx}", "").strip()
-                or _smart_meter_site_default(idx, "label", "")
-            )
+            site_label = str(s.get(f"smart_meter_site_label_{idx}", "")).strip()
             omit_site_label = bool(s.get(f"smart_meter_site_label_{idx}_omit", False))
         else:
             site_label = ""
@@ -427,6 +440,9 @@ def _collect_form_data(document_type: str | None) -> dict:
         "smart_meter_timestamp_format": "datetime" if timestamp_format == "Datetime" else "iso_8601_utc",
         "xlsx_split_by_company": False,
         "companies": companies,
+        **_collect_distractor_fields(s),
+        **_collect_layout(s),
+        **_collect_invalid_data(s),
     }
 
 

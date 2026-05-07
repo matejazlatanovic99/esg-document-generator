@@ -6,6 +6,7 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO, StringIO
+from typing import Any
 
 import openpyxl
 from docx import Document
@@ -20,6 +21,95 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 from components.stationary_combustion.units import default_fuel_volume_unit
+from utils.bad_data import (
+    FTYPE_CURRENCY_UNIT,
+    FTYPE_DATE_TIME,
+    FTYPE_IDENTIFIER,
+    FTYPE_NUMERIC,
+    FTYPE_TEXT,
+    corrupt_records,
+    get_bad_data_config,
+)
+from utils.distractor_fields import resolve_distractor_plan, resolve_tabular_value
+from utils.layouts import resolve_layout_plan
+
+# ── field-type maps for each document type ────────────────────────────────────
+
+_FUEL_INVOICE_FIELD_TYPES: dict[str, str] = {
+    "company": FTYPE_TEXT,
+    "supplier": FTYPE_TEXT,
+    "customer": FTYPE_TEXT,
+    "site": FTYPE_TEXT,
+    "country": FTYPE_TEXT,
+    "equipment": FTYPE_TEXT,
+    "emission_source": FTYPE_TEXT,
+    "fuel": FTYPE_TEXT,
+    "customer_code": FTYPE_IDENTIFIER,
+    "invoice_no": FTYPE_IDENTIFIER,
+    "period_label": FTYPE_DATE_TIME,
+    "quantity": FTYPE_NUMERIC,
+    "unit_price": FTYPE_NUMERIC,
+    "fuel_cost": FTYPE_NUMERIC,
+    "delivery_charge": FTYPE_NUMERIC,
+    "subtotal": FTYPE_NUMERIC,
+    "vat": FTYPE_NUMERIC,
+    "total": FTYPE_NUMERIC,
+    "currency": FTYPE_CURRENCY_UNIT,
+    "unit": FTYPE_CURRENCY_UNIT,
+}
+
+_DELIVERY_NOTE_FIELD_TYPES: dict[str, str] = {
+    "company": FTYPE_TEXT,
+    "supplier": FTYPE_TEXT,
+    "customer": FTYPE_TEXT,
+    "site": FTYPE_TEXT,
+    "country": FTYPE_TEXT,
+    "equipment": FTYPE_TEXT,
+    "fuel": FTYPE_TEXT,
+    "delivery_note_no": FTYPE_IDENTIFIER,
+    "period_label": FTYPE_DATE_TIME,
+    "quantity": FTYPE_NUMERIC,
+    "currency": FTYPE_CURRENCY_UNIT,
+    "unit": FTYPE_CURRENCY_UNIT,
+}
+
+_FUEL_CARD_TRANSACTION_FIELD_TYPES: dict[str, str] = {
+    "site": FTYPE_TEXT,
+    "country": FTYPE_TEXT,
+    "equipment": FTYPE_TEXT,
+    "emission_source": FTYPE_TEXT,
+    "merchant": FTYPE_TEXT,
+    "fuel": FTYPE_TEXT,
+    "card_number": FTYPE_IDENTIFIER,
+    "reference": FTYPE_IDENTIFIER,
+    "quantity": FTYPE_NUMERIC,
+    "unit_price": FTYPE_NUMERIC,
+    "total": FTYPE_NUMERIC,
+    "unit": FTYPE_CURRENCY_UNIT,
+}
+
+_GENERATOR_LOG_FIELD_TYPES: dict[str, str] = {
+    "site": FTYPE_TEXT,
+    "company": FTYPE_TEXT,
+    "country": FTYPE_TEXT,
+    "equipment": FTYPE_TEXT,
+    "emission_source": FTYPE_TEXT,
+    "fuel": FTYPE_TEXT,
+    "period": FTYPE_DATE_TIME,
+    "fuel_used": FTYPE_NUMERIC,
+    "unit": FTYPE_CURRENCY_UNIT,
+}
+
+_BEMS_ASSET_FIELD_TYPES: dict[str, str] = {
+    "equipment_name": FTYPE_TEXT,
+    "emission_source": FTYPE_TEXT,
+    "fuel": FTYPE_TEXT,
+    "asset_tag": FTYPE_IDENTIFIER,
+    "sensor_name": FTYPE_IDENTIFIER,
+    "quantity": FTYPE_NUMERIC,
+    "operating_hours": FTYPE_NUMERIC,
+    "unit": FTYPE_CURRENCY_UNIT,
+}
 
 TWOPLACES = Decimal("0.01")
 PAGE_W, PAGE_H = A4
@@ -417,12 +507,29 @@ def _tr(raw_config: dict, key: str, **kwargs) -> str:
     return template.format(**kwargs) if kwargs else template
 
 
-def _fmt_date(value: date) -> str:
+def _fmt_date(value) -> str:
+    if isinstance(value, str):
+        return value
     return value.strftime("%d %b %Y")
 
 
+def _fmt_num(value, spec: str = ",.2f") -> str:
+    """Format a numeric value; return as-is if already a corrupted string."""
+    if isinstance(value, str):
+        return value
+    try:
+        return format(value, spec)
+    except Exception:
+        return str(value)
+
+
 def _fmt_money(value) -> str:
-    return f"{_q2(value):,.2f}"
+    if isinstance(value, str):
+        return value
+    try:
+        return f"{_q2(value):,.2f}"
+    except Exception:
+        return str(value)
 
 
 def _fmt_optional_number(value, suffix: str = "") -> str:
@@ -444,6 +551,217 @@ def _currency_symbol(currency_raw: str) -> str:
         if token in currency_raw:
             return symbol
     return ""
+
+
+_FUEL_CARD_HEADER_KEYS = {
+    "card_no": "card_no",
+    "date": "date",
+    "merchant": "merchant",
+    "site": "site",
+    "country": "country",
+    "equipment": "equipment",
+    "emission_source": "emission_source",
+    "product": "product",
+    "qty": "qty",
+    "unit": "unit",
+    "unit_price": "unit_price",
+    "total": "total",
+    "currency": "currency",
+}
+
+_GENERATOR_LOG_HEADER_KEYS = {
+    "company": "company",
+    "site": "site",
+    "country": "country",
+    "date": "date",
+    "start_time": "start_time",
+    "end_time": "end_time",
+    "run_hours": "run_hours",
+    "start_fuel": "start_fuel",
+    "end_fuel": "end_fuel",
+    "fuel_used": "fuel_used",
+    "unit": "unit",
+    "equipment": "equipment",
+    "emission_source": "emission_source",
+    "fuel_type": "fuel_type",
+    "notes": "notes",
+}
+
+_BEMS_EQUIPMENT_HEADER_KEYS = {
+    "equipment_tag": "equipment_tag",
+    "equipment_name": "equipment_name",
+    "emission_source": "emission_source",
+    "fuel_type": "fuel_type",
+    "consumption": "consumption",
+    "unit": "unit",
+    "operating_hours": "operating_hours",
+}
+
+_BEMS_TIME_SERIES_HEADER_KEYS = {
+    "timestamp": "timestamp",
+    "site": "site",
+    "equipment_tag": "equipment_tag",
+    "sensor_name": "sensor_name",
+    "value": "value",
+    "unit": "unit",
+}
+
+
+def _stationary_layout_context(raw_config: dict) -> dict:
+    return {
+        "language": raw_config.get("document", {}).get("language", "en"),
+        "period_label": raw_config.get("financial_period", {}).get("label", ""),
+        "company_labels": [company.get("label", f"Company {index + 1}") for index, company in enumerate(raw_config.get("companies", []))],
+        "bems_report_type": raw_config.get("document", {}).get("bems_report_type", "equipment_trend_report"),
+    }
+
+
+def _stationary_layout_plan(raw_config: dict, output_format: str, *, document_type: str | None = None) -> dict:
+    return resolve_layout_plan(
+        raw_config.get("document", {}),
+        random_seed=int(raw_config.get("random_seed", 42)),
+        category="stationary_combustion",
+        document_type=document_type or str(raw_config.get("document_type") or raw_config.get("document", {}).get("type") or "fuel_invoice"),
+        output_format=output_format,
+        context=_stationary_layout_context(raw_config),
+    )
+
+
+def _ordered_stationary_field_ids(plan: dict, default_ids: list[str]) -> list[str]:
+    ordered = [field_id for field_id in plan.get("column_order", []) if field_id in default_ids]
+    return ordered or list(default_ids)
+
+
+def _stationary_header_text(
+    raw_config: dict,
+    plan: dict,
+    field_id: str,
+    default_key: str,
+    distractor_fields: dict[str, Any] | None = None,
+) -> str:
+    if distractor_fields and field_id in distractor_fields:
+        return str(distractor_fields[field_id].label)
+    return plan.get("header_aliases", {}).get(field_id) or _tr(raw_config, default_key)
+
+
+def _stationary_document_type(raw_config: dict, document_type: str | None = None) -> str:
+    return str(document_type or raw_config.get("document_type") or raw_config.get("document", {}).get("type") or "fuel_invoice")
+
+
+def _stationary_distractor_plan(
+    raw_config: dict,
+    output_format: str,
+    *,
+    document_type: str | None = None,
+    artifact_key: str = "root",
+):
+    return resolve_distractor_plan(
+        raw_config.get("document", {}),
+        random_seed=int(raw_config.get("random_seed", 42)),
+        category="stationary_combustion",
+        document_type=_stationary_document_type(raw_config, document_type),
+        output_format=output_format,
+        artifact_key=artifact_key,
+        context=_stationary_layout_context(raw_config),
+    )
+
+
+def _augment_stationary_field_ids(base_field_ids: list[str], distractor_plan) -> list[str]:
+    ordered = list(base_field_ids)
+    if not distractor_plan or not getattr(distractor_plan, "enabled", False):
+        return ordered
+    for field in distractor_plan.tabular_fields:
+        insert_at = len(ordered)
+        if field.anchor in ordered:
+            anchor_index = ordered.index(field.anchor)
+            insert_at = anchor_index + 1 if field.position == "after" else anchor_index
+        ordered.insert(insert_at, field.field_id)
+    return ordered
+
+
+def _stationary_distractor_field_map(distractor_plan) -> dict[str, Any]:
+    if not distractor_plan or not getattr(distractor_plan, "enabled", False):
+        return {}
+    return {field.field_id: field for field in distractor_plan.tabular_fields}
+
+
+def _stationary_scope_subkey(
+    field,
+    row_key: str,
+    *,
+    statement_key: str | None = None,
+    block_key: str | None = None,
+) -> str:
+    if getattr(field, "row_scope", "row") == "statement":
+        return statement_key or block_key or row_key
+    if getattr(field, "row_scope", "row") == "block":
+        return block_key or statement_key or row_key
+    if getattr(field, "row_scope", "row") == "file":
+        return "file"
+    return row_key
+
+
+def _stationary_row_values(
+    row_map: dict[str, Any],
+    ordered_ids: list[str],
+    distractor_plan,
+    *,
+    row_key: str,
+    statement_key: str | None = None,
+    block_key: str | None = None,
+) -> list[Any]:
+    distractor_fields = _stationary_distractor_field_map(distractor_plan)
+    values: list[Any] = []
+    for field_id in ordered_ids:
+        if field_id in distractor_fields:
+            field = distractor_fields[field_id]
+            values.append(
+                resolve_tabular_value(
+                    distractor_plan,
+                    field,
+                    _stationary_scope_subkey(field, row_key, statement_key=statement_key, block_key=block_key),
+                )
+            )
+            continue
+        values.append(row_map[field_id])
+    return values
+
+
+def _stationary_document_lines(distractor_plan, *, placement: str | None = None) -> list[str]:
+    if not distractor_plan or not getattr(distractor_plan, "enabled", False):
+        return []
+    return [
+        f"{field.label}: {field.value}"
+        for field in distractor_plan.document_fields
+        if placement is None or field.placement == placement
+    ]
+
+
+def _stationary_document_pairs(distractor_plan, *, placement: str | None = None) -> list[tuple[str, str]]:
+    if not distractor_plan or not getattr(distractor_plan, "enabled", False):
+        return []
+    return [
+        (field.label, field.value)
+        for field in distractor_plan.document_fields
+        if placement is None or field.placement == placement
+    ]
+
+
+def _write_stationary_csv_preamble(writer: csv.writer, plan: dict) -> None:
+    for row in plan.get("preamble_rows", []):
+        writer.writerow(row)
+    for _ in range(int(plan.get("header_row_offset", 0) or 0)):
+        writer.writerow([])
+
+
+def _write_stationary_xlsx_preamble(sheet, start_row: int, plan: dict) -> int:
+    row_index = start_row
+    for row in plan.get("preamble_rows", []):
+        for column_index, value in enumerate(row, start=1):
+            sheet.cell(row=row_index, column=column_index, value=value)
+        row_index += 1
+    row_index += int(plan.get("header_row_offset", 0) or 0)
+    return row_index
 
 
 def _with_special_chars(config: dict, value: str) -> str:
@@ -941,73 +1259,152 @@ def _build_bems_trend_exports(raw_config: dict) -> list[dict]:
     return exports
 
 
+# ── corruption wrappers (call _build_* then apply bad_data) ─────────────────
+
+def _corrupted_fuel_invoice_records(raw_config: dict) -> list[dict]:
+    cfg = get_bad_data_config(raw_config)
+    return corrupt_records(_build_fuel_invoice_records(raw_config), "fuel_invoice", _FUEL_INVOICE_FIELD_TYPES, cfg)
+
+
+def _corrupted_delivery_note_records(raw_config: dict) -> list[dict]:
+    cfg = get_bad_data_config(raw_config)
+    return corrupt_records(_build_delivery_note_records(raw_config), "delivery_note", _DELIVERY_NOTE_FIELD_TYPES, cfg)
+
+
+def _corrupted_fuel_card_statements(raw_config: dict) -> list[dict]:
+    cfg = get_bad_data_config(raw_config)
+    statements = _build_fuel_card_statements(raw_config)
+    result = []
+    for s_idx, statement in enumerate(statements):
+        new_statement = dict(statement)
+        new_statement["transactions"] = corrupt_records(
+            statement["transactions"], f"fuel_card:s{s_idx}", _FUEL_CARD_TRANSACTION_FIELD_TYPES, cfg
+        )
+        result.append(new_statement)
+    return result
+
+
+def _corrupted_generator_log_rows(raw_config: dict) -> list[dict]:
+    cfg = get_bad_data_config(raw_config)
+    return corrupt_records(_build_generator_log_rows(raw_config), "generator_log", _GENERATOR_LOG_FIELD_TYPES, cfg)
+
+
+def _corrupted_bems_site_blocks(raw_config: dict) -> list[dict]:
+    """Corrupt assets inside each block; used by equipment-report generators only."""
+    cfg = get_bad_data_config(raw_config)
+    blocks = _build_bems_site_blocks(raw_config)
+    result = []
+    for b_idx, block in enumerate(blocks):
+        new_block = dict(block)
+        new_block["assets"] = corrupt_records(block["assets"], f"bems:b{b_idx}", _BEMS_ASSET_FIELD_TYPES, cfg)
+        result.append(new_block)
+    return result
+
+
+def _safe_float(value, fallback: float = 0.0) -> float:
+    """Return float(value) or fallback if value is a non-numeric string."""
+    if isinstance(value, str):
+        return fallback
+    try:
+        return float(value)
+    except Exception:
+        return fallback
+
+
 def _ground_truth_entries(raw_config: dict) -> list[dict]:
     document_type = raw_config.get("document_type", "fuel_invoice")
+    cfg = get_bad_data_config(raw_config)
+
     if document_type == "fuel_invoice":
+        records = corrupt_records(
+            _build_fuel_invoice_records(raw_config), "fuel_invoice", _FUEL_INVOICE_FIELD_TYPES, cfg
+        )
         return [
             {
                 "Company": record["company"],
                 "Site": record["site"],
                 "Country": record["country"],
-                "Period": f"{record['period_start'].isoformat()} to {record['period_end'].isoformat()}",
+                "Period": f"{record['period_start'].isoformat() if hasattr(record['period_start'], 'isoformat') else record['period_start']} to {record['period_end'].isoformat() if hasattr(record['period_end'], 'isoformat') else record['period_end']}",
                 "Equipment": record["equipment"],
                 "Emission source": record["emission_source"],
                 "Fuel": record["fuel"],
-                "Quantity": float(record["quantity"]),
+                "Quantity": record["quantity"] if isinstance(record["quantity"], str) else float(record["quantity"]),
                 "Unit": record["unit"],
-                "Cost": float(record["subtotal"]),
-                "Currency": record["currency"].split()[0],
+                "Cost": record["subtotal"] if isinstance(record["subtotal"], str) else float(record["subtotal"]),
+                "Currency": record["currency"].split()[0] if isinstance(record["currency"], str) and " " in record["currency"] else record["currency"],
             }
-            for record in _build_fuel_invoice_records(raw_config)
+            for record in records
         ]
     if document_type == "delivery_note":
+        records = corrupt_records(
+            _build_delivery_note_records(raw_config), "delivery_note", _DELIVERY_NOTE_FIELD_TYPES, cfg
+        )
         return [
             {
                 "Company": record["company"],
                 "Site": record["site"],
                 "Country": record["country"],
-                "Period": record["delivery_date"].isoformat(),
+                "Period": record["delivery_date"].isoformat() if hasattr(record["delivery_date"], "isoformat") else record["delivery_date"],
                 "Equipment": record["equipment"],
                 "Fuel": record["fuel"],
-                "Quantity": float(record["quantity"]),
+                "Quantity": record["quantity"] if isinstance(record["quantity"], str) else float(record["quantity"]),
                 "Unit": record["unit"],
             }
-            for record in _build_delivery_note_records(raw_config)
+            for record in records
         ]
     if document_type == "fuel_card":
+        statements = _build_fuel_card_statements(raw_config)
+        corrupted_statements = []
+        for s_idx, statement in enumerate(statements):
+            new_statement = dict(statement)
+            new_statement["transactions"] = corrupt_records(
+                statement["transactions"], f"fuel_card:s{s_idx}", _FUEL_CARD_TRANSACTION_FIELD_TYPES, cfg
+            )
+            corrupted_statements.append(new_statement)
         return [
             {
                 "Company": statement["company"],
                 "Site": transaction["site"],
                 "Country": transaction["country"],
-                "Period": f"{statement['period_start'].isoformat()} to {statement['period_end'].isoformat()}",
+                "Period": f"{statement['period_start'].isoformat() if hasattr(statement['period_start'], 'isoformat') else statement['period_start']} to {statement['period_end'].isoformat() if hasattr(statement['period_end'], 'isoformat') else statement['period_end']}",
                 "Equipment": transaction["equipment"],
                 "Emission source": transaction["emission_source"],
                 "Fuel": transaction["fuel"],
-                "Quantity": float(transaction["quantity"]),
+                "Quantity": transaction["quantity"] if isinstance(transaction["quantity"], str) else float(transaction["quantity"]),
                 "Unit": transaction["unit"],
-                "Cost": float(transaction["total"]),
-                "Currency": statement["currency"].split()[0],
+                "Cost": transaction["total"] if isinstance(transaction["total"], str) else float(transaction["total"]),
+                "Currency": statement["currency"].split()[0] if isinstance(statement["currency"], str) and " " in statement["currency"] else statement["currency"],
             }
-            for statement in _build_fuel_card_statements(raw_config)
+            for statement in corrupted_statements
             for transaction in statement["transactions"]
         ]
     if document_type == "bems":
+        blocks = _build_bems_site_blocks(raw_config)
+        corrupted_blocks = []
+        for b_idx, block in enumerate(blocks):
+            new_block = dict(block)
+            new_block["assets"] = corrupt_records(
+                block["assets"], f"bems:b{b_idx}", _BEMS_ASSET_FIELD_TYPES, cfg
+            )
+            corrupted_blocks.append(new_block)
         return [
             {
                 "Company": block["company"],
                 "Site": block["site"],
                 "Country": block["country"],
-                "Period": f"{block['period_start'].isoformat()} to {block['period_end'].isoformat()}",
+                "Period": f"{block['period_start'].isoformat() if hasattr(block['period_start'], 'isoformat') else block['period_start']} to {block['period_end'].isoformat() if hasattr(block['period_end'], 'isoformat') else block['period_end']}",
                 "Equipment": asset["equipment_name"],
                 "Emission source": asset["emission_source"],
                 "Fuel": asset["fuel"],
-                "Quantity": float(asset["quantity"]),
+                "Quantity": asset["quantity"] if isinstance(asset["quantity"], str) else float(asset["quantity"]),
                 "Unit": asset["unit"],
             }
-            for block in _build_bems_site_blocks(raw_config)
+            for block in corrupted_blocks
             for asset in block["assets"]
         ]
+    rows = corrupt_records(
+        _build_generator_log_rows(raw_config), "generator_log", _GENERATOR_LOG_FIELD_TYPES, cfg
+    )
     return [
         {
             "Site": row["site"],
@@ -1016,10 +1413,10 @@ def _ground_truth_entries(raw_config: dict) -> list[dict]:
             "Equipment": row["equipment"],
             "Emission source": row["emission_source"],
             "Fuel": row["fuel"],
-            "Quantity": row["fuel_used"],
+            "Quantity": row["fuel_used"] if isinstance(row["fuel_used"], str) else row["fuel_used"],
             "Unit": row["unit"],
         }
-        for row in _build_generator_log_rows(raw_config)
+        for row in rows
     ]
 
 
@@ -1067,7 +1464,12 @@ def _set_docx_cell_text(cell, text: str, *, bold: bool = False, color: str | Non
 
 
 def generate_fuel_invoice_pdf(raw_config: dict) -> bytes:
-    records = _build_fuel_invoice_records(raw_config)
+    records = _corrupted_fuel_invoice_records(raw_config)
+    distractor_plan = _stationary_distractor_plan(raw_config, "PDF", document_type="fuel_invoice")
+    layout_plan = _stationary_layout_plan(raw_config, "PDF")
+    if layout_plan.get("enabled"):
+        return _generate_fuel_invoice_pdf_variant(raw_config, records, layout_plan, distractor_plan)
+
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     c.setTitle(raw_config.get("document", {}).get("title", _tr(raw_config, "fuel_invoice_title")))
@@ -1106,13 +1508,19 @@ def generate_fuel_invoice_pdf(raw_config: dict) -> bytes:
             f"{_tr(raw_config, 'billing_period')}: {_fmt_date(record['period_start'])} - {_fmt_date(record['period_end'])}",
             f"{_tr(raw_config, 'currency')}: {record['currency']}",
             f"{_tr(raw_config, 'country')}: {record['country']}",
+            *_stationary_document_lines(distractor_plan, placement="meta"),
         ]
         _draw_multiline(c, 320, PAGE_H - 126, meta_lines)
 
         c.setFont("Helvetica-Bold", 11)
         c.drawString(320, PAGE_H - 236, _tr(raw_config, "delivery_site"))
         c.setFont("Helvetica", 10)
-        delivery_lines = [record["site"], record["equipment"], record["emission_source"]]
+        delivery_lines = [
+            record["site"],
+            record["equipment"],
+            record["emission_source"],
+            *_stationary_document_lines(distractor_plan, placement="summary"),
+        ]
         _draw_multiline(c, 320, PAGE_H - 254, [line for line in delivery_lines if line])
 
         table_top = PAGE_H - 330
@@ -1138,7 +1546,7 @@ def generate_fuel_invoice_pdf(raw_config: dict) -> bytes:
         rows = [
             (
                 record["fuel"],
-                f"{record['quantity']:,.2f}",
+                _fmt_num(record["quantity"]),
                 record["unit"],
                 f"{_currency_symbol(record['currency'])}{_fmt_money(record['unit_price'])}",
                 f"{_currency_symbol(record['currency'])}{_fmt_money(record['fuel_cost'])}",
@@ -1191,8 +1599,121 @@ def generate_fuel_invoice_pdf(raw_config: dict) -> bytes:
     return buffer.getvalue()
 
 
+def _generate_fuel_invoice_pdf_variant(raw_config: dict, records: list[dict], layout_plan: dict, distractor_plan) -> bytes:
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.setTitle(raw_config.get("document", {}).get("title", _tr(raw_config, "fuel_invoice_title")))
+    c.setSubject(raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion"))
+
+    for index, record in enumerate(records):
+        if index > 0:
+            c.showPage()
+
+        accent = colors.HexColor("#1E5B88")
+        c.setFillColor(accent)
+        c.rect(36, PAGE_H - 72, PAGE_W - 72, 28, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(48, PAGE_H - 62, record["supplier"])
+        c.setFont("Helvetica", 8)
+        c.drawRightString(PAGE_W - 48, PAGE_H - 61, _tr(raw_config, "fuel_invoice_title"))
+
+        current_top = PAGE_H - 108
+        section_order = [section for section in (layout_plan.get("section_order") or ["addresses", "meta", "line_items", "totals", "footer"]) if section in {"addresses", "meta", "line_items", "totals"}]
+        currency_symbol = _currency_symbol(record["currency"])
+
+        for section_name in section_order:
+            if section_name == "addresses":
+                c.setFillColor(colors.black)
+                c.setFont("Helvetica", 10)
+                current_top = _draw_multiline(c, 48, current_top, record["supplier_address"]) - 10
+                c.setFont("Helvetica-Bold", 11)
+                c.drawString(48, current_top, _tr(raw_config, "bill_to"))
+                c.setFont("Helvetica", 10)
+                current_top = _draw_multiline(c, 48, current_top - 16, [record["customer"], *record["site_address"]]) - 18
+            elif section_name == "meta":
+                c.setFont("Helvetica-Bold", 11)
+                c.drawString(320, current_top, _tr(raw_config, "invoice_details"))
+                c.setFont("Helvetica", 10)
+                meta_lines = [
+                    f"{_tr(raw_config, 'invoice_no')}: {record['invoice_no']}",
+                    f"{_tr(raw_config, 'invoice_date')}: {_fmt_date(record['invoice_date'])}",
+                    f"{_tr(raw_config, 'billing_period')}: {_fmt_date(record['period_start'])} - {_fmt_date(record['period_end'])}",
+                    f"{_tr(raw_config, 'currency')}: {record['currency']}",
+                    f"{_tr(raw_config, 'country')}: {record['country']}",
+                    *_stationary_document_lines(distractor_plan, placement="meta"),
+                ]
+                meta_bottom = _draw_multiline(c, 320, current_top - 18, meta_lines)
+                c.setFont("Helvetica-Bold", 11)
+                c.drawString(48, meta_bottom - 6, _tr(raw_config, "delivery_site"))
+                c.setFont("Helvetica", 10)
+                current_top = _draw_multiline(
+                    c,
+                    48,
+                    meta_bottom - 22,
+                    [
+                        line
+                        for line in [
+                            record["site"],
+                            record["equipment"],
+                            record["emission_source"],
+                            *_stationary_document_lines(distractor_plan, placement="summary"),
+                        ]
+                        if line
+                    ],
+                ) - 18
+            elif section_name == "line_items":
+                table_top = current_top - 8
+                table_x = 48
+                table_widths = [210, 68, 58, 84, 84]
+                headers = [_tr(raw_config, "product"), _tr(raw_config, "quantity"), _tr(raw_config, "unit"), _tr(raw_config, "unit_price"), _tr(raw_config, "amount")]
+                c.setFillColor(accent)
+                c.rect(table_x, table_top, sum(table_widths), 22, fill=1, stroke=0)
+                c.setFillColor(colors.white)
+                c.setFont("Helvetica-Bold", 9)
+                x_cursor = table_x + 6
+                for header, width in zip(headers, table_widths):
+                    c.drawString(x_cursor, table_top + 7, header)
+                    x_cursor += width
+                rows = [
+                    (record["fuel"], _fmt_num(record["quantity"]), record["unit"], f"{currency_symbol}{_fmt_money(record['unit_price'])}", f"{currency_symbol}{_fmt_money(record['fuel_cost'])}"),
+                    (_tr(raw_config, "delivery_charge"), "1", _tr(raw_config, "each"), f"{currency_symbol}{_fmt_money(record['delivery_charge'])}", f"{currency_symbol}{_fmt_money(record['delivery_charge'])}"),
+                ]
+                y_row = table_top - 24
+                c.setFont("Helvetica", 9)
+                c.setFillColor(colors.black)
+                for row in rows:
+                    c.rect(table_x, y_row, sum(table_widths), 20, fill=0, stroke=1)
+                    x_cursor = table_x + 6
+                    for value, width in zip(row, table_widths):
+                        c.drawString(x_cursor, y_row + 6, str(value))
+                        x_cursor += width
+                    y_row -= 20
+                current_top = y_row - 14
+            elif section_name == "totals":
+                summary_y = current_top
+                for label, value, is_total in [(_tr(raw_config, "subtotal"), record["subtotal"], False), (f"VAT ({record['vat_rate']}%)", record["vat"], False), (_tr(raw_config, "total"), record["total"], True)]:
+                    c.setFont("Helvetica-Bold" if is_total else "Helvetica", 10)
+                    c.drawRightString(PAGE_W - 180, summary_y, label)
+                    c.drawRightString(PAGE_W - 48, summary_y, f"{currency_symbol}{_fmt_money(value)}")
+                    summary_y -= 18
+                current_top = summary_y - 10
+
+        c.setFont("Helvetica", 8)
+        c.setFillColor(colors.grey)
+        c.drawString(48, 42, _tr(raw_config, "fuel_invoice_footer"))
+
+    c.save()
+    return buffer.getvalue()
+
+
 def generate_fuel_invoice_docx(raw_config: dict) -> bytes:
-    records = _build_fuel_invoice_records(raw_config)
+    records = _corrupted_fuel_invoice_records(raw_config)
+    distractor_plan = _stationary_distractor_plan(raw_config, "DOCX", document_type="fuel_invoice")
+    layout_plan = _stationary_layout_plan(raw_config, "DOCX")
+    if layout_plan.get("enabled"):
+        return _generate_fuel_invoice_docx_variant(raw_config, records, layout_plan, distractor_plan)
+
     document = Document()
     document.core_properties.title = raw_config.get("document", {}).get("title", _tr(raw_config, "fuel_invoice_title"))
     document.core_properties.subject = raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion")
@@ -1211,9 +1732,19 @@ def generate_fuel_invoice_docx(raw_config: dict) -> bytes:
             f"{_tr(raw_config, 'billing_period')}: {_fmt_date(record['period_start'])} - {_fmt_date(record['period_end'])}\n"
             f"{_tr(raw_config, 'currency')}: {record['currency']}\n"
             f"{_tr(raw_config, 'country')}: {record['country']}"
+            + ("\n" + "\n".join(_stationary_document_lines(distractor_plan, placement="meta")) if _stationary_document_lines(distractor_plan, placement="meta") else "")
         )
         top_table.cell(1, 1).text = "\n".join(
-            [line for line in [record["site"], record["equipment"], record["emission_source"]] if line]
+            [
+                line
+                for line in [
+                    record["site"],
+                    record["equipment"],
+                    record["emission_source"],
+                    *_stationary_document_lines(distractor_plan, placement="summary"),
+                ]
+                if line
+            ]
         )
 
         bill_to_heading = document.add_paragraph()
@@ -1237,7 +1768,7 @@ def generate_fuel_invoice_docx(raw_config: dict) -> bytes:
         line_rows = [
             (
                 record["fuel"],
-                f"{record['quantity']:,.2f}",
+                _fmt_num(record["quantity"]),
                 record["unit"],
                 f"{_currency_symbol(record['currency'])}{_fmt_money(record['unit_price'])}",
                 f"{_currency_symbol(record['currency'])}{_fmt_money(record['fuel_cost'])}",
@@ -1272,8 +1803,98 @@ def generate_fuel_invoice_docx(raw_config: dict) -> bytes:
     return output.getvalue()
 
 
+def _generate_fuel_invoice_docx_variant(raw_config: dict, records: list[dict], layout_plan: dict, distractor_plan) -> bytes:
+    document = Document()
+    document.core_properties.title = raw_config.get("document", {}).get("title", _tr(raw_config, "fuel_invoice_title"))
+    document.core_properties.subject = raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion")
+
+    for index, record in enumerate(records):
+        document.add_heading(record["supplier"], level=1)
+        document.add_paragraph(_tr(raw_config, "fuel_invoice_title"))
+
+        def render_addresses() -> None:
+            document.add_paragraph("\n".join(record["supplier_address"]))
+            heading = document.add_paragraph()
+            heading.add_run(_tr(raw_config, "bill_to")).bold = True
+            document.add_paragraph("\n".join([record["customer"], *record["site_address"]]))
+
+        def render_meta() -> None:
+            top_table = document.add_table(rows=2, cols=2)
+            top_table.style = "Table Grid"
+            top_table.cell(0, 0).text = _tr(raw_config, "invoice_details")
+            top_table.cell(0, 1).text = _tr(raw_config, "delivery_site")
+            top_table.cell(1, 0).text = (
+                f"{_tr(raw_config, 'invoice_no')}: {record['invoice_no']}\n"
+                f"{_tr(raw_config, 'invoice_date')}: {_fmt_date(record['invoice_date'])}\n"
+                f"{_tr(raw_config, 'billing_period')}: {_fmt_date(record['period_start'])} - {_fmt_date(record['period_end'])}\n"
+                f"{_tr(raw_config, 'currency')}: {record['currency']}\n"
+                f"{_tr(raw_config, 'country')}: {record['country']}"
+                + ("\n" + "\n".join(_stationary_document_lines(distractor_plan, placement="meta")) if _stationary_document_lines(distractor_plan, placement="meta") else "")
+            )
+            top_table.cell(1, 1).text = "\n".join([
+                line
+                for line in [
+                    record["site"],
+                    record["equipment"],
+                    record["emission_source"],
+                    *_stationary_document_lines(distractor_plan, placement="summary"),
+                ]
+                if line
+            ])
+
+        def render_line_items() -> None:
+            line_table = document.add_table(rows=1, cols=5)
+            line_table.style = "Table Grid"
+            for cell, header in zip(line_table.rows[0].cells, [_tr(raw_config, "product"), _tr(raw_config, "quantity"), _tr(raw_config, "unit"), _tr(raw_config, "unit_price"), _tr(raw_config, "amount")]):
+                cell.text = header
+            for values in [
+                (record["fuel"], _fmt_num(record["quantity"]), record["unit"], f"{_currency_symbol(record['currency'])}{_fmt_money(record['unit_price'])}", f"{_currency_symbol(record['currency'])}{_fmt_money(record['fuel_cost'])}"),
+                (_tr(raw_config, "delivery_charge"), "1", _tr(raw_config, "each"), f"{_currency_symbol(record['currency'])}{_fmt_money(record['delivery_charge'])}", f"{_currency_symbol(record['currency'])}{_fmt_money(record['delivery_charge'])}"),
+            ]:
+                row = line_table.add_row().cells
+                for cell, value in zip(row, values):
+                    cell.text = str(value)
+
+        def render_totals() -> None:
+            totals = document.add_table(rows=3, cols=2)
+            totals.style = "Table Grid"
+            totals.cell(0, 0).text = _tr(raw_config, "subtotal")
+            totals.cell(0, 1).text = f"{_currency_symbol(record['currency'])}{_fmt_money(record['subtotal'])}"
+            totals.cell(1, 0).text = f"VAT ({record['vat_rate']}%)"
+            totals.cell(1, 1).text = f"{_currency_symbol(record['currency'])}{_fmt_money(record['vat'])}"
+            totals.cell(2, 0).text = _tr(raw_config, "total")
+            totals.cell(2, 1).text = f"{_currency_symbol(record['currency'])}{_fmt_money(record['total'])}"
+
+        def render_footer() -> None:
+            document.add_paragraph(_tr(raw_config, "fuel_invoice_footer"))
+
+        for section_name in (layout_plan.get("section_order") or ["addresses", "meta", "line_items", "totals", "footer"]):
+            if section_name == "addresses":
+                render_addresses()
+            elif section_name == "meta":
+                render_meta()
+            elif section_name == "line_items":
+                render_line_items()
+            elif section_name == "totals":
+                render_totals()
+            elif section_name == "footer":
+                render_footer()
+
+        if index < len(records) - 1:
+            document.add_page_break()
+
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
 def generate_delivery_note_pdf(raw_config: dict) -> bytes:
-    records = _build_delivery_note_records(raw_config)
+    records = _corrupted_delivery_note_records(raw_config)
+    distractor_plan = _stationary_distractor_plan(raw_config, "PDF", document_type="delivery_note")
+    layout_plan = _stationary_layout_plan(raw_config, "PDF")
+    if layout_plan.get("enabled"):
+        return _generate_delivery_note_pdf_variant(raw_config, records, layout_plan, distractor_plan)
+
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     c.setTitle(raw_config.get("document", {}).get("title", _tr(raw_config, "delivery_note_title")))
@@ -1297,6 +1918,7 @@ def generate_delivery_note_pdf(raw_config: dict) -> bytes:
             f"{_tr(raw_config, 'supplier')}: {record['supplier']}",
             f"{_tr(raw_config, 'delivery_note_no')}: {record['delivery_note_no']}",
             f"{_tr(raw_config, 'delivery_date')}: {_fmt_date(record['delivery_date'])}",
+            *_stationary_document_lines(distractor_plan, placement="meta"),
         ]
         y = _draw_multiline(c, 48, y, meta_lines, leading=16)
 
@@ -1322,6 +1944,7 @@ def generate_delivery_note_pdf(raw_config: dict) -> bytes:
             (_tr(raw_config, "delivered_quantity"), f"{_fmt_money(record['quantity'])} {record['unit']}"),
             (_tr(raw_config, "driver_ref"), record["driver_ref"]),
             (_tr(raw_config, "customer_signature"), record["customer_signature"]),
+            *_stationary_document_pairs(distractor_plan, placement="summary"),
         ]
         line_y = panel_top - 28
         for label, value in detail_lines:
@@ -1341,8 +1964,84 @@ def generate_delivery_note_pdf(raw_config: dict) -> bytes:
     return buffer.getvalue()
 
 
+def _generate_delivery_note_pdf_variant(raw_config: dict, records: list[dict], layout_plan: dict, distractor_plan) -> bytes:
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.setTitle(raw_config.get("document", {}).get("title", _tr(raw_config, "delivery_note_title")))
+    c.setSubject(raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion fuel delivery"))
+
+    for index, record in enumerate(records):
+        if index > 0:
+            c.showPage()
+
+        accent = colors.HexColor("#1E5B88")
+        c.setFillColor(accent)
+        c.rect(36, PAGE_H - 72, PAGE_W - 72, 30, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 15)
+        c.drawString(48, PAGE_H - 62, _tr(raw_config, "delivery_note_title"))
+
+        current_top = PAGE_H - 114
+        for section_name in (layout_plan.get("section_order") or ["addresses", "delivery_details", "footer"]):
+            if section_name == "addresses":
+                c.setFillColor(colors.black)
+                c.setFont("Helvetica", 10)
+                meta_lines = [
+                    f"{_tr(raw_config, 'supplier')}: {record['supplier']}",
+                    f"{_tr(raw_config, 'delivery_note_no')}: {record['delivery_note_no']}",
+                    f"{_tr(raw_config, 'delivery_date')}: {_fmt_date(record['delivery_date'])}",
+                    *_stationary_document_lines(distractor_plan, placement="meta"),
+                ]
+                current_top = _draw_multiline(c, 48, current_top, meta_lines, leading=16) - 8
+                c.setFont("Helvetica-Bold", 11)
+                c.drawString(48, current_top, _tr(raw_config, "customer"))
+                c.setFont("Helvetica", 10)
+                c.drawString(48, current_top - 16, record["customer"])
+                c.setFont("Helvetica-Bold", 11)
+                c.drawString(48, current_top - 54, _tr(raw_config, "delivery_address"))
+                c.setFont("Helvetica", 10)
+                current_top = _draw_multiline(c, 48, current_top - 70, [record["site"], *record["site_address"]], leading=14) - 18
+            elif section_name == "delivery_details":
+                panel_top = current_top - 8
+                panel_height = 166
+                c.setFillColor(colors.HexColor("#F5F8FB"))
+                c.roundRect(36, panel_top - panel_height, PAGE_W - 72, panel_height, 8, fill=1, stroke=0)
+                c.setFillColor(colors.black)
+                c.setFont("Helvetica-Bold", 11)
+                detail_lines = [
+                    (_tr(raw_config, "product_delivered"), record["fuel"]),
+                    (_tr(raw_config, "tank_equipment"), record["equipment"]),
+                    (_tr(raw_config, "delivered_quantity"), f"{_fmt_money(record['quantity'])} {record['unit']}"),
+                    (_tr(raw_config, "driver_ref"), record["driver_ref"]),
+                    (_tr(raw_config, "customer_signature"), record["customer_signature"]),
+                    *_stationary_document_pairs(distractor_plan, placement="summary"),
+                ]
+                line_y = panel_top - 28
+                for label, value in detail_lines:
+                    if not value:
+                        continue
+                    c.drawString(52, line_y, f"{label}:")
+                    c.setFont("Helvetica", 10)
+                    c.drawString(184, line_y, value)
+                    c.setFont("Helvetica-Bold", 11)
+                    line_y -= 28
+                current_top = panel_top - panel_height - 18
+
+        c.setFont("Helvetica", 8)
+        c.setFillColor(colors.grey)
+        c.drawString(48, 42, _tr(raw_config, "delivery_note_footer"))
+
+    c.save()
+    return buffer.getvalue()
+
+
 def generate_delivery_note_docx(raw_config: dict) -> bytes:
-    records = _build_delivery_note_records(raw_config)
+    records = _corrupted_delivery_note_records(raw_config)
+    distractor_plan = _stationary_distractor_plan(raw_config, "DOCX", document_type="delivery_note")
+    layout_plan = _stationary_layout_plan(raw_config, "DOCX")
+    if layout_plan.get("enabled"):
+        return _generate_delivery_note_docx_variant(raw_config, records, layout_plan, distractor_plan)
+
     document = Document()
     _style_docx_document(document)
     document.core_properties.title = raw_config.get("document", {}).get("title", _tr(raw_config, "delivery_note_title"))
@@ -1378,6 +2077,7 @@ def generate_delivery_note_docx(raw_config: dict) -> bytes:
                 f"{_tr(raw_config, 'delivery_note_no')}: {record['delivery_note_no']}\n"
                 f"{_tr(raw_config, 'delivery_date')}: {_fmt_date(record['delivery_date'])}\n"
                 f"{_tr(raw_config, 'country')}: {record['country']}"
+                + ("\n" + "\n".join(_stationary_document_lines(distractor_plan, placement="meta")) if _stationary_document_lines(distractor_plan, placement="meta") else "")
             ),
         )
 
@@ -1401,6 +2101,7 @@ def generate_delivery_note_docx(raw_config: dict) -> bytes:
             (_tr(raw_config, "delivered_quantity"), f"{_fmt_money(record['quantity'])} {record['unit']}"),
             (_tr(raw_config, "driver_ref"), record["driver_ref"]),
             (_tr(raw_config, "customer_signature"), record["customer_signature"]),
+            *_stationary_document_pairs(distractor_plan, placement="summary"),
         ]:
             if not value:
                 continue
@@ -1423,8 +2124,91 @@ def generate_delivery_note_docx(raw_config: dict) -> bytes:
     return output.getvalue()
 
 
+def _generate_delivery_note_docx_variant(raw_config: dict, records: list[dict], layout_plan: dict, distractor_plan) -> bytes:
+    document = Document()
+    _style_docx_document(document)
+    document.core_properties.title = raw_config.get("document", {}).get("title", _tr(raw_config, "delivery_note_title"))
+    document.core_properties.subject = raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion fuel delivery")
+
+    for index, record in enumerate(records):
+        banner = document.add_table(rows=1, cols=2)
+        banner.style = "Table Grid"
+        banner.autofit = False
+        banner.columns[0].width = Inches(4.8)
+        banner.columns[1].width = Inches(2.0)
+        _shade_docx_cell(banner.cell(0, 0), "1E5B88")
+        _shade_docx_cell(banner.cell(0, 1), "1E5B88")
+        _set_docx_cell_text(banner.cell(0, 0), record["supplier"], bold=True, color="FFFFFF", size=13)
+        _set_docx_cell_text(banner.cell(0, 1), _tr(raw_config, "delivery_note_title"), bold=True, color="FFFFFF", size=12)
+        banner.cell(0, 1).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+        def render_addresses() -> None:
+            section_heading = document.add_paragraph()
+            section_heading.add_run(_tr(raw_config, "delivery_address")).bold = True
+            document.add_paragraph("\n".join([record["customer"], "", record["site"], *record["site_address"]]))
+
+        def render_delivery_details() -> None:
+            meta = document.add_table(rows=1, cols=2)
+            meta.style = "Table Grid"
+            _shade_docx_cell(meta.cell(0, 0), "DCEBF5")
+            _shade_docx_cell(meta.cell(0, 1), "DCEBF5")
+            _set_docx_cell_text(meta.cell(0, 0), _tr(raw_config, "delivery_details"), bold=True)
+            _set_docx_cell_text(
+                meta.cell(0, 1),
+                f"{_tr(raw_config, 'delivery_note_no')}: {record['delivery_note_no']}\n{_tr(raw_config, 'delivery_date')}: {_fmt_date(record['delivery_date'])}\n{_tr(raw_config, 'country')}: {record['country']}"
+                + ("\n" + "\n".join(_stationary_document_lines(distractor_plan, placement="meta")) if _stationary_document_lines(distractor_plan, placement="meta") else ""),
+            )
+
+            details = document.add_table(rows=0, cols=2)
+            details.style = "Table Grid"
+            details.autofit = False
+            details.columns[0].width = Inches(2.1)
+            details.columns[1].width = Inches(4.7)
+            for label, value in [
+                (_tr(raw_config, "product_delivered"), record["fuel"]),
+                (_tr(raw_config, "tank_equipment"), record["equipment"]),
+                (_tr(raw_config, "delivered_quantity"), f"{_fmt_money(record['quantity'])} {record['unit']}"),
+                (_tr(raw_config, "driver_ref"), record["driver_ref"]),
+                (_tr(raw_config, "customer_signature"), record["customer_signature"]),
+                *_stationary_document_pairs(distractor_plan, placement="summary"),
+            ]:
+                if not value:
+                    continue
+                row = details.add_row().cells
+                _shade_docx_cell(row[0], "F5F8FB")
+                _set_docx_cell_text(row[0], label, bold=True)
+                _set_docx_cell_text(row[1], value)
+
+        def render_footer() -> None:
+            footer = document.add_paragraph()
+            footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            footer_run = footer.add_run(_tr(raw_config, "delivery_note_footer"))
+            footer_run.font.size = Pt(8)
+            footer_run.font.color.rgb = RGBColor.from_string("6E7A86")
+
+        for section_name in (layout_plan.get("section_order") or ["addresses", "delivery_details", "footer"]):
+            if section_name == "addresses":
+                render_addresses()
+            elif section_name == "delivery_details":
+                render_delivery_details()
+            elif section_name == "footer":
+                render_footer()
+
+        if index < len(records) - 1:
+            document.add_page_break()
+
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
 def generate_fuel_card_pdf(raw_config: dict) -> bytes:
-    statements = _build_fuel_card_statements(raw_config)
+    statements = _corrupted_fuel_card_statements(raw_config)
+    distractor_plan = _stationary_distractor_plan(raw_config, "PDF", document_type="fuel_card")
+    layout_plan = _stationary_layout_plan(raw_config, "PDF")
+    if layout_plan.get("enabled"):
+        return _generate_fuel_card_pdf_variant(raw_config, statements, layout_plan, distractor_plan)
+
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     c.setTitle(raw_config.get("document", {}).get("title", _tr(raw_config, "fuel_card_title")))
@@ -1451,6 +2235,7 @@ def generate_fuel_card_pdf(raw_config: dict) -> bytes:
                 f"{_tr(raw_config, 'provider')}: {statement['provider']}",
                 f"{_tr(raw_config, 'statement_period')}: {_fmt_date(statement['period_start'])} - {_fmt_date(statement['period_end'])}",
                 f"{_tr(raw_config, 'currency')}: {statement['currency']}",
+                *_stationary_document_lines(distractor_plan),
             ]
             _draw_multiline(c, 48, PAGE_H - 108, meta_lines, leading=14)
 
@@ -1513,8 +2298,111 @@ def generate_fuel_card_pdf(raw_config: dict) -> bytes:
     return buffer.getvalue()
 
 
+def _generate_fuel_card_pdf_variant(raw_config: dict, statements: list[dict], layout_plan: dict, distractor_plan) -> bytes:
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.setTitle(raw_config.get("document", {}).get("title", _tr(raw_config, "fuel_card_title")))
+    c.setSubject(raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion fuel card transactions"))
+
+    page_size = 18
+    for statement_index, statement in enumerate(statements):
+        transactions = statement["transactions"]
+        for page_start in range(0, max(len(transactions), 1), page_size):
+            if statement_index > 0 or page_start > 0:
+                c.showPage()
+
+            accent = colors.HexColor("#1E5B88")
+            c.setFillColor(accent)
+            c.rect(36, PAGE_H - 74, PAGE_W - 72, 30, fill=1, stroke=0)
+            c.setFillColor(colors.white)
+            c.setFont("Helvetica-Bold", 15)
+            c.drawString(48, PAGE_H - 63, _tr(raw_config, "fuel_card_title"))
+
+            meta_lines = [
+                f"{_tr(raw_config, 'account_name')}: {statement['account_name']}",
+                f"{_tr(raw_config, 'provider')}: {statement['provider']}",
+                f"{_tr(raw_config, 'statement_period')}: {_fmt_date(statement['period_start'])} - {_fmt_date(statement['period_end'])}",
+                f"{_tr(raw_config, 'currency')}: {statement['currency']}",
+                *_stationary_document_lines(distractor_plan),
+            ]
+            visible_transactions = transactions[page_start:page_start + page_size]
+            currency_symbol = _currency_symbol(statement["currency"])
+            current_top = PAGE_H - 108
+            section_order = [section for section in (layout_plan.get("section_order") or ["summary", "transactions", "footer"]) if section in {"summary", "transactions"}]
+
+            for section_name in section_order:
+                if section_name == "summary":
+                    c.setFillColor(colors.black)
+                    c.setFont("Helvetica", 10)
+                    current_top = _draw_multiline(c, 48, current_top, meta_lines, leading=14) - 18
+                elif section_name == "transactions":
+                    table_x = 36
+                    table_top = current_top - 6
+                    column_widths = [62, 54, 116, 102, 66, 40, 28, 54, 54]
+                    headers = [
+                        _tr(raw_config, "card_no"),
+                        _tr(raw_config, "date"),
+                        _tr(raw_config, "merchant"),
+                        _tr(raw_config, "reference"),
+                        _tr(raw_config, "product"),
+                        _tr(raw_config, "qty"),
+                        _tr(raw_config, "unit"),
+                        _tr(raw_config, "unit_price"),
+                        _tr(raw_config, "total"),
+                    ]
+                    c.setFillColor(accent)
+                    c.rect(table_x, table_top, sum(column_widths), 22, fill=1, stroke=0)
+                    c.setFillColor(colors.white)
+                    c.setFont("Helvetica-Bold", 7.5)
+                    cursor = table_x + 4
+                    for header, width in zip(headers, column_widths):
+                        c.drawString(cursor, table_top + 7, header)
+                        cursor += width
+
+                    row_y = table_top - 18
+                    c.setFillColor(colors.black)
+                    c.setFont("Helvetica", 7.5)
+                    for transaction in visible_transactions:
+                        c.rect(table_x, row_y, sum(column_widths), 18, fill=0, stroke=1)
+                        cursor = table_x + 4
+                        row_values = [
+                            transaction["card_number"],
+                            transaction["date"].strftime("%d-%m-%y"),
+                            transaction["merchant"],
+                            transaction["reference"],
+                            transaction["fuel"],
+                            _fmt_money(transaction["quantity"]),
+                            transaction["unit"],
+                            f"{currency_symbol}{_fmt_money(transaction['unit_price'])}",
+                            f"{currency_symbol}{_fmt_money(transaction['total'])}",
+                        ]
+                        for value, width in zip(row_values, column_widths):
+                            c.drawString(cursor, row_y + 5, str(value))
+                            cursor += width
+                        row_y -= 18
+
+                    if page_start + page_size >= len(transactions):
+                        c.setFont("Helvetica-Bold", 10)
+                        c.drawRightString(PAGE_W - 180, row_y - 18, _tr(raw_config, "statement_total"))
+                        c.drawRightString(PAGE_W - 48, row_y - 18, f"{currency_symbol}{_fmt_money(statement['statement_total'])}")
+                        row_y -= 34
+                    current_top = row_y - 10
+
+            c.setFont("Helvetica", 8)
+            c.setFillColor(colors.grey)
+            c.drawString(48, 42, _tr(raw_config, "fuel_card_footer"))
+
+    c.save()
+    return buffer.getvalue()
+
+
 def generate_fuel_card_docx(raw_config: dict) -> bytes:
-    statements = _build_fuel_card_statements(raw_config)
+    statements = _corrupted_fuel_card_statements(raw_config)
+    distractor_plan = _stationary_distractor_plan(raw_config, "DOCX", document_type="fuel_card")
+    layout_plan = _stationary_layout_plan(raw_config, "DOCX")
+    if layout_plan.get("enabled"):
+        return _generate_fuel_card_docx_variant(raw_config, statements, layout_plan, distractor_plan)
+
     document = Document()
     _style_docx_document(document)
     document.core_properties.title = raw_config.get("document", {}).get("title", _tr(raw_config, "fuel_card_title"))
@@ -1549,6 +2437,7 @@ def generate_fuel_card_docx(raw_config: dict) -> bytes:
             (
                 f"{_tr(raw_config, 'statement_period')}: {_fmt_date(statement['period_start'])} - {_fmt_date(statement['period_end'])}\n"
                 f"{_tr(raw_config, 'currency')}: {statement['currency']}"
+                + ("\n" + "\n".join(_stationary_document_lines(distractor_plan)) if _stationary_document_lines(distractor_plan) else "")
             ),
         )
 
@@ -1602,8 +2491,120 @@ def generate_fuel_card_docx(raw_config: dict) -> bytes:
     return output.getvalue()
 
 
+def _generate_fuel_card_docx_variant(raw_config: dict, statements: list[dict], layout_plan: dict, distractor_plan) -> bytes:
+    document = Document()
+    _style_docx_document(document)
+    document.core_properties.title = raw_config.get("document", {}).get("title", _tr(raw_config, "fuel_card_title"))
+    document.core_properties.subject = raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion fuel card transactions")
+
+    for statement_index, statement in enumerate(statements):
+        banner = document.add_table(rows=1, cols=2)
+        banner.style = "Table Grid"
+        banner.autofit = False
+        banner.columns[0].width = Inches(4.8)
+        banner.columns[1].width = Inches(2.0)
+        _shade_docx_cell(banner.cell(0, 0), "1E5B88")
+        _shade_docx_cell(banner.cell(0, 1), "1E5B88")
+        _set_docx_cell_text(banner.cell(0, 0), statement["account_name"], bold=True, color="FFFFFF", size=13)
+        _set_docx_cell_text(banner.cell(0, 1), _tr(raw_config, "fuel_card_title"), bold=True, color="FFFFFF", size=12)
+        banner.cell(0, 1).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+        currency_symbol = _currency_symbol(statement["currency"])
+
+        def render_summary() -> None:
+            meta = document.add_table(rows=2, cols=2)
+            meta.style = "Table Grid"
+            meta.autofit = False
+            meta.columns[0].width = Inches(4.2)
+            meta.columns[1].width = Inches(2.6)
+            for cell, heading in zip(meta.rows[0].cells, [_tr(raw_config, "account_details"), _tr(raw_config, "statement_details")]):
+                _shade_docx_cell(cell, "DCEBF5")
+                _set_docx_cell_text(cell, heading, bold=True)
+            _set_docx_cell_text(
+                meta.cell(1, 0),
+                f"{_tr(raw_config, 'account_name')}: {statement['account_name']}\n{_tr(raw_config, 'provider')}: {statement['provider']}",
+            )
+            _set_docx_cell_text(
+                meta.cell(1, 1),
+                (
+                    f"{_tr(raw_config, 'statement_period')}: {_fmt_date(statement['period_start'])} - {_fmt_date(statement['period_end'])}\n"
+                    f"{_tr(raw_config, 'currency')}: {statement['currency']}"
+                    + ("\n" + "\n".join(_stationary_document_lines(distractor_plan)) if _stationary_document_lines(distractor_plan) else "")
+                ),
+            )
+
+        def render_transactions() -> None:
+            document.add_paragraph()
+            table = document.add_table(rows=1, cols=10)
+            table.style = "Table Grid"
+            headers = [
+                _tr(raw_config, "card_no"),
+                _tr(raw_config, "date"),
+                _tr(raw_config, "merchant"),
+                _tr(raw_config, "reference"),
+                _tr(raw_config, "product"),
+                _tr(raw_config, "qty"),
+                _tr(raw_config, "unit"),
+                _tr(raw_config, "unit_price"),
+                _tr(raw_config, "total"),
+                _tr(raw_config, "currency"),
+            ]
+            for cell, header in zip(table.rows[0].cells, headers):
+                _shade_docx_cell(cell, "F5F8FB")
+                _set_docx_cell_text(cell, header, bold=True)
+
+            for transaction in statement["transactions"]:
+                row = table.add_row().cells
+                values = [
+                    transaction["card_number"],
+                    transaction["date"].strftime("%d-%m-%y"),
+                    transaction["merchant"],
+                    transaction["reference"],
+                    transaction["fuel"],
+                    _fmt_money(transaction["quantity"]),
+                    transaction["unit"],
+                    f"{currency_symbol}{_fmt_money(transaction['unit_price'])}",
+                    f"{currency_symbol}{_fmt_money(transaction['total'])}",
+                    statement["currency"].split()[0],
+                ]
+                for cell, value in zip(row, values):
+                    _set_docx_cell_text(cell, str(value))
+
+            totals = document.add_table(rows=1, cols=2)
+            totals.style = "Table Grid"
+            _shade_docx_cell(totals.cell(0, 0), "F5F8FB")
+            _set_docx_cell_text(totals.cell(0, 0), _tr(raw_config, "statement_total"), bold=True)
+            _set_docx_cell_text(totals.cell(0, 1), f"{currency_symbol}{_fmt_money(statement['statement_total'])}", bold=True)
+
+        def render_footer() -> None:
+            footer = document.add_paragraph()
+            footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            run = footer.add_run(_tr(raw_config, "fuel_card_footer"))
+            run.font.size = Pt(8)
+            run.font.color.rgb = RGBColor.from_string("6E7A86")
+
+        for section_name in (layout_plan.get("section_order") or ["summary", "transactions", "footer"]):
+            if section_name == "summary":
+                render_summary()
+            elif section_name == "transactions":
+                render_transactions()
+            elif section_name == "footer":
+                render_footer()
+
+        if statement_index < len(statements) - 1:
+            document.add_page_break()
+
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
 def generate_fuel_card_xlsx(raw_config: dict) -> bytes:
-    statements = _build_fuel_card_statements(raw_config)
+    statements = _corrupted_fuel_card_statements(raw_config)
+    layout_plan = _stationary_layout_plan(raw_config, "XLSX")
+    distractor_plan = _stationary_distractor_plan(raw_config, "XLSX", document_type="fuel_card")
+    distractor_fields = _stationary_distractor_field_map(distractor_plan)
+    ordered_ids = _augment_stationary_field_ids(_ordered_stationary_field_ids(layout_plan, list(_FUEL_CARD_HEADER_KEYS)), distractor_plan)
     workbook = openpyxl.Workbook()
     workbook.remove(workbook.active)
 
@@ -1618,51 +2619,69 @@ def generate_fuel_card_xlsx(raw_config: dict) -> bytes:
         sheet["A4"] = _tr(raw_config, "currency")
         sheet["B4"] = statement["currency"]
 
+        header_row = _write_stationary_xlsx_preamble(sheet, 5, layout_plan)
         headers = [
-            _tr(raw_config, "card_no"),
-            _tr(raw_config, "date"),
-            _tr(raw_config, "merchant"),
-            _tr(raw_config, "site"),
-            _tr(raw_config, "country"),
-            _tr(raw_config, "equipment"),
-            _tr(raw_config, "emission_source"),
-            _tr(raw_config, "product"),
-            _tr(raw_config, "qty"),
-            _tr(raw_config, "unit"),
-            _tr(raw_config, "unit_price"),
-            _tr(raw_config, "total"),
-            _tr(raw_config, "currency"),
+            _stationary_header_text(
+                raw_config,
+                layout_plan,
+                field_id,
+                _FUEL_CARD_HEADER_KEYS.get(field_id, field_id),
+                distractor_fields,
+            )
+            for field_id in ordered_ids
         ]
         header_fill = PatternFill(fill_type="solid", fgColor="1E5B88")
         for column_index, header in enumerate(headers, start=1):
-            cell = sheet.cell(row=6, column=column_index, value=header)
+            cell = sheet.cell(row=header_row, column=column_index, value=header)
             cell.font = Font(color="FFFFFF", bold=True)
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal="center")
 
-        row_index = 7
+        row_index = header_row + 1
         for transaction in statement["transactions"]:
-            values = [
-                transaction["card_number"],
-                transaction["date"].strftime("%d-%m-%y"),
-                transaction["merchant"],
-                transaction["site"],
-                transaction["country"],
-                transaction["equipment"],
-                transaction["emission_source"],
-                transaction["fuel"],
-                float(transaction["quantity"]),
-                transaction["unit"],
-                float(transaction["unit_price"]),
-                float(transaction["total"]),
-                statement["currency"].split()[0],
-            ]
+            row_map = {
+                "card_no": transaction["card_number"],
+                "date": transaction["date"].strftime("%d-%m-%y"),
+                "merchant": transaction["merchant"],
+                "site": transaction["site"],
+                "country": transaction["country"],
+                "equipment": transaction["equipment"],
+                "emission_source": transaction["emission_source"],
+                "product": transaction["fuel"],
+                "qty": float(transaction["quantity"]) if not isinstance(transaction["quantity"], str) else transaction["quantity"],
+                "unit": transaction["unit"],
+                "unit_price": float(transaction["unit_price"]) if not isinstance(transaction["unit_price"], str) else transaction["unit_price"],
+                "total": float(transaction["total"]) if not isinstance(transaction["total"], str) else transaction["total"],
+                "currency": statement["currency"].split()[0],
+            }
+            values = _stationary_row_values(
+                row_map,
+                ordered_ids,
+                distractor_plan,
+                row_key=f"{transaction['date'].isoformat()}:{transaction['card_number']}:{transaction['reference']}",
+                statement_key=f"{statement['account_name']}:{statement['period_start'].isoformat()}:{statement['period_end'].isoformat()}",
+            )
             for column_index, value in enumerate(values, start=1):
                 sheet.cell(row=row_index, column=column_index, value=value)
             row_index += 1
 
-        widths = [12, 12, 22, 18, 14, 18, 18, 14, 10, 8, 12, 12, 10]
-        for column_index, width in enumerate(widths, start=1):
+        width_map = {
+            "card_no": 12,
+            "date": 12,
+            "merchant": 22,
+            "site": 18,
+            "country": 14,
+            "equipment": 18,
+            "emission_source": 18,
+            "product": 14,
+            "qty": 10,
+            "unit": 8,
+            "unit_price": 12,
+            "total": 12,
+            "currency": 10,
+        }
+        for column_index, field_id in enumerate(ordered_ids, start=1):
+            width = width_map.get(field_id, 14)
             sheet.column_dimensions[get_column_letter(column_index)].width = width
 
     output = BytesIO()
@@ -1671,7 +2690,11 @@ def generate_fuel_card_xlsx(raw_config: dict) -> bytes:
 
 
 def generate_fuel_card_csv(raw_config: dict) -> bytes:
-    statements = _build_fuel_card_statements(raw_config)
+    statements = _corrupted_fuel_card_statements(raw_config)
+    layout_plan = _stationary_layout_plan(raw_config, "CSV")
+    distractor_plan = _stationary_distractor_plan(raw_config, "CSV", document_type="fuel_card")
+    distractor_fields = _stationary_distractor_field_map(distractor_plan)
+    ordered_ids = _augment_stationary_field_ids(_ordered_stationary_field_ids(layout_plan, list(_FUEL_CARD_HEADER_KEYS)), distractor_plan)
     buffer = StringIO()
     writer = csv.writer(buffer)
 
@@ -1683,37 +2706,42 @@ def generate_fuel_card_csv(raw_config: dict) -> bytes:
         writer.writerow([_tr(raw_config, "statement_period"), f"{statement['period_start'].isoformat()} to {statement['period_end'].isoformat()}"])
         writer.writerow([_tr(raw_config, "currency"), statement["currency"]])
         writer.writerow([])
+        _write_stationary_csv_preamble(writer, layout_plan)
         writer.writerow([
-            _tr(raw_config, "card_no"),
-            _tr(raw_config, "date"),
-            _tr(raw_config, "merchant"),
-            _tr(raw_config, "site"),
-            _tr(raw_config, "country"),
-            _tr(raw_config, "equipment"),
-            _tr(raw_config, "emission_source"),
-            _tr(raw_config, "product"),
-            _tr(raw_config, "qty"),
-            _tr(raw_config, "unit"),
-            _tr(raw_config, "unit_price"),
-            _tr(raw_config, "total"),
-            _tr(raw_config, "currency"),
+            _stationary_header_text(
+                raw_config,
+                layout_plan,
+                field_id,
+                _FUEL_CARD_HEADER_KEYS.get(field_id, field_id),
+                distractor_fields,
+            )
+            for field_id in ordered_ids
         ])
         for transaction in statement["transactions"]:
-            writer.writerow([
-                transaction["card_number"],
-                transaction["date"].strftime("%d-%m-%y"),
-                transaction["merchant"],
-                transaction["site"],
-                transaction["country"],
-                transaction["equipment"],
-                transaction["emission_source"],
-                transaction["fuel"],
-                f"{float(transaction['quantity']):.2f}",
-                transaction["unit"],
-                f"{float(transaction['unit_price']):.2f}",
-                f"{float(transaction['total']):.2f}",
-                statement["currency"].split()[0],
-            ])
+            row_map = {
+                "card_no": transaction["card_number"],
+                "date": transaction["date"].strftime("%d-%m-%y"),
+                "merchant": transaction["merchant"],
+                "site": transaction["site"],
+                "country": transaction["country"],
+                "equipment": transaction["equipment"],
+                "emission_source": transaction["emission_source"],
+                "product": transaction["fuel"],
+                "qty": _fmt_num(transaction["quantity"], ".2f"),
+                "unit": transaction["unit"],
+                "unit_price": _fmt_num(transaction["unit_price"], ".2f"),
+                "total": _fmt_num(transaction["total"], ".2f"),
+                "currency": statement["currency"].split()[0] if isinstance(statement["currency"], str) and " " in statement["currency"] else statement["currency"],
+            }
+            writer.writerow(
+                _stationary_row_values(
+                    row_map,
+                    ordered_ids,
+                    distractor_plan,
+                    row_key=f"{transaction['date'].isoformat()}:{transaction['card_number']}:{transaction['reference']}",
+                    statement_key=f"{statement['account_name']}:{statement['period_start'].isoformat()}:{statement['period_end'].isoformat()}",
+                )
+            )
 
     return buffer.getvalue().encode("utf-8-sig")
 
@@ -1739,7 +2767,11 @@ def _log_headers(raw_config: dict) -> list[str]:
 
 
 def generate_generator_log_xlsx(raw_config: dict) -> bytes:
-    rows = _build_generator_log_rows(raw_config)
+    rows = _corrupted_generator_log_rows(raw_config)
+    layout_plan = _stationary_layout_plan(raw_config, "XLSX")
+    distractor_plan = _stationary_distractor_plan(raw_config, "XLSX", document_type="generator_log")
+    distractor_fields = _stationary_distractor_field_map(distractor_plan)
+    ordered_ids = _augment_stationary_field_ids(_ordered_stationary_field_ids(layout_plan, list(_GENERATOR_LOG_HEADER_KEYS)), distractor_plan)
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = _tr(raw_config, "generator_log_sheet_title")
@@ -1750,37 +2782,71 @@ def generate_generator_log_xlsx(raw_config: dict) -> bytes:
     sheet["A2"] = raw_config.get("financial_period", {}).get("label", "")
     sheet["A2"].font = Font(italic=True)
 
-    headers = _log_headers(raw_config)
+    header_row = _write_stationary_xlsx_preamble(sheet, 3, layout_plan)
+    headers = [
+        _stationary_header_text(
+            raw_config,
+            layout_plan,
+            field_id,
+            _GENERATOR_LOG_HEADER_KEYS.get(field_id, field_id),
+            distractor_fields,
+        )
+        for field_id in ordered_ids
+    ]
     header_fill = PatternFill(fill_type="solid", fgColor="1E5B88")
     for column_index, header in enumerate(headers, start=1):
-        cell = sheet.cell(row=4, column=column_index, value=header)
+        cell = sheet.cell(row=header_row, column=column_index, value=header)
         cell.font = Font(color="FFFFFF", bold=True)
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center")
 
-    for row_index, row in enumerate(rows, start=5):
-        values = [
-            row["company"],
-            row["site"],
-            row["country"],
-            row["date"].strftime("%d-%m-%y"),
-            row["start_time"],
-            row["end_time"],
-            row["run_hours"],
-            row["start_fuel"],
-            row["end_fuel"],
-            row["fuel_used"],
-            row["unit"],
-            row["equipment"],
-            row["emission_source"],
-            row["fuel"],
-            row["notes"],
-        ]
+    for row_index, row in enumerate(rows, start=header_row + 1):
+        row_map = {
+            "company": row["company"],
+            "site": row["site"],
+            "country": row["country"],
+            "date": row["date"].strftime("%d-%m-%y"),
+            "start_time": row["start_time"],
+            "end_time": row["end_time"],
+            "run_hours": row["run_hours"],
+            "start_fuel": row["start_fuel"],
+            "end_fuel": row["end_fuel"],
+            "fuel_used": row["fuel_used"],
+            "unit": row["unit"],
+            "equipment": row["equipment"],
+            "emission_source": row["emission_source"],
+            "fuel_type": row["fuel"],
+            "notes": row["notes"],
+        }
+        values = _stationary_row_values(
+            row_map,
+            ordered_ids,
+            distractor_plan,
+            row_key=f"{row['period']}:{row['equipment']}:{row['start_time']}",
+            block_key=f"{row['company']}:{row['site']}",
+        )
         for column_index, value in enumerate(values, start=1):
             sheet.cell(row=row_index, column=column_index, value=value)
 
-    widths = [18, 22, 18, 12, 12, 12, 10, 12, 12, 10, 8, 20, 22, 18, 18]
-    for column_index, width in enumerate(widths, start=1):
+    width_map = {
+        "company": 18,
+        "site": 22,
+        "country": 18,
+        "date": 12,
+        "start_time": 12,
+        "end_time": 12,
+        "run_hours": 10,
+        "start_fuel": 12,
+        "end_fuel": 12,
+        "fuel_used": 10,
+        "unit": 8,
+        "equipment": 20,
+        "emission_source": 22,
+        "fuel_type": 18,
+        "notes": 18,
+    }
+    for column_index, field_id in enumerate(ordered_ids, start=1):
+        width = width_map.get(field_id, 14)
         sheet.column_dimensions[get_column_letter(column_index)].width = width
 
     output = BytesIO()
@@ -1789,33 +2855,61 @@ def generate_generator_log_xlsx(raw_config: dict) -> bytes:
 
 
 def generate_generator_log_csv(raw_config: dict) -> bytes:
-    rows = _build_generator_log_rows(raw_config)
+    rows = _corrupted_generator_log_rows(raw_config)
+    layout_plan = _stationary_layout_plan(raw_config, "CSV")
+    distractor_plan = _stationary_distractor_plan(raw_config, "CSV", document_type="generator_log")
+    distractor_fields = _stationary_distractor_field_map(distractor_plan)
+    ordered_ids = _augment_stationary_field_ids(_ordered_stationary_field_ids(layout_plan, list(_GENERATOR_LOG_HEADER_KEYS)), distractor_plan)
     buffer = StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(_log_headers(raw_config))
+    _write_stationary_csv_preamble(writer, layout_plan)
+    writer.writerow([
+        _stationary_header_text(
+            raw_config,
+            layout_plan,
+            field_id,
+            _GENERATOR_LOG_HEADER_KEYS.get(field_id, field_id),
+            distractor_fields,
+        )
+        for field_id in ordered_ids
+    ])
     for row in rows:
-        writer.writerow([
-            row["company"],
-            row["site"],
-            row["country"],
-            row["date"].strftime("%d-%m-%y"),
-            row["start_time"],
-            row["end_time"],
-            f"{row['run_hours']:.2f}",
-            row["start_fuel"],
-            row["end_fuel"],
-            f"{row['fuel_used']:.2f}",
-            row["unit"],
-            row["equipment"],
-            row["emission_source"],
-            row["fuel"],
-            row["notes"],
-        ])
+        row_map = {
+            "company": row["company"],
+            "site": row["site"],
+            "country": row["country"],
+            "date": row["date"].strftime("%d-%m-%y"),
+            "start_time": row["start_time"],
+            "end_time": row["end_time"],
+            "run_hours": f"{row['run_hours']:.2f}",
+            "start_fuel": row["start_fuel"],
+            "end_fuel": row["end_fuel"],
+            "fuel_used": _fmt_num(row["fuel_used"], ".2f"),
+            "unit": row["unit"],
+            "equipment": row["equipment"],
+            "emission_source": row["emission_source"],
+            "fuel_type": row["fuel"],
+            "notes": row["notes"],
+        }
+        writer.writerow(
+            _stationary_row_values(
+                row_map,
+                ordered_ids,
+                distractor_plan,
+                row_key=f"{row['period']}:{row['equipment']}:{row['start_time']}",
+                block_key=f"{row['company']}:{row['site']}",
+            )
+        )
     return buffer.getvalue().encode("utf-8-sig")
 
 
 def generate_bems_equipment_report_pdf(raw_config: dict) -> bytes:
-    blocks = _build_bems_site_blocks(raw_config)
+    blocks = _corrupted_bems_site_blocks(raw_config)
+    distractor_plan = _stationary_distractor_plan(raw_config, "PDF", document_type="bems")
+    layout_plan = _stationary_layout_plan(raw_config, "PDF", document_type="bems")
+    if layout_plan.get("enabled"):
+        return _generate_bems_equipment_report_pdf_variant(raw_config, blocks, layout_plan, distractor_plan)
+
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     c.setTitle(raw_config.get("document", {}).get("title", _tr(raw_config, "bems_equipment_title")))
@@ -1839,13 +2933,22 @@ def generate_bems_equipment_report_pdf(raw_config: dict) -> bytes:
             f"{_tr(raw_config, 'site')}: {block['site']}",
             f"{_tr(raw_config, 'country')}: {block['country']}",
             f"{_tr(raw_config, 'reporting_period')}: {block['period_label']}",
+            *_stationary_document_lines(distractor_plan),
         ]
         meta_lines = [line for line in meta_lines if not line.endswith(": ")]
         _draw_multiline(c, 48, PAGE_H - 108, meta_lines, leading=14)
 
         total_assets = len(block["assets"])
-        total_hours = sum(asset["operating_hours"] or Decimal("0") for asset in block["assets"])
-        dominant_asset = max(block["assets"], key=lambda asset: asset["quantity"], default=None)
+        total_hours = sum(
+            Decimal("0") if (asset["operating_hours"] is None or isinstance(asset["operating_hours"], str))
+            else asset["operating_hours"]
+            for asset in block["assets"]
+        )
+        dominant_asset = max(
+            (a for a in block["assets"] if not isinstance(a["quantity"], str)),
+            key=lambda asset: asset["quantity"],
+            default=None,
+        )
         cards = [
             (_tr(raw_config, "assets"), str(total_assets)),
             (_tr(raw_config, "operating_hours"), _fmt_optional_number(total_hours, " h") or "n/a"),
@@ -1888,7 +2991,10 @@ def generate_bems_equipment_report_pdf(raw_config: dict) -> bytes:
             cursor += width
 
         row_y = table_top - 22
-        max_quantity = max((float(asset["quantity"]) for asset in block["assets"]), default=1.0)
+        max_quantity = max(
+            (_safe_float(asset["quantity"]) for asset in block["assets"]),
+            default=1.0,
+        ) or 1.0
         for asset in block["assets"]:
             c.setFillColor(colors.black)
             c.rect(table_x, row_y, sum(column_widths), 20, fill=0, stroke=1)
@@ -1913,7 +3019,7 @@ def generate_bems_equipment_report_pdf(raw_config: dict) -> bytes:
         c.drawString(48, chart_y + 96, _tr(raw_config, "equipment_trend_snapshot"))
         for idx, asset in enumerate(block["assets"][:5]):
             bar_y = chart_y + 72 - (idx * 18)
-            bar_width = 220 * (float(asset["quantity"]) / max_quantity if max_quantity else 0)
+            bar_width = 220 * (_safe_float(asset["quantity"]) / max_quantity if max_quantity else 0)
             c.setFont("Helvetica", 8)
             c.drawString(48, bar_y + 4, asset["asset_tag"])
             c.setFillColor(colors.HexColor("#DCEBF5"))
@@ -1931,8 +3037,147 @@ def generate_bems_equipment_report_pdf(raw_config: dict) -> bytes:
     return buffer.getvalue()
 
 
+def _generate_bems_equipment_report_pdf_variant(raw_config: dict, blocks: list[dict], layout_plan: dict, distractor_plan) -> bytes:
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.setTitle(raw_config.get("document", {}).get("title", _tr(raw_config, "bems_equipment_title")))
+    c.setSubject(raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion BEMS export"))
+
+    for block_index, block in enumerate(blocks):
+        if block_index > 0:
+            c.showPage()
+
+        accent = colors.HexColor("#1E5B88")
+        c.setFillColor(accent)
+        c.rect(36, PAGE_H - 78, PAGE_W - 72, 34, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 15)
+        c.drawString(48, PAGE_H - 64, _tr(raw_config, "bems_equipment_title"))
+
+        total_assets = len(block["assets"])
+        total_hours = sum(
+            Decimal("0") if (asset["operating_hours"] is None or isinstance(asset["operating_hours"], str)) else asset["operating_hours"]
+            for asset in block["assets"]
+        )
+        dominant_asset = max(
+            (a for a in block["assets"] if not isinstance(a["quantity"], str)),
+            key=lambda asset: asset["quantity"],
+            default=None,
+        )
+
+        def render_meta(current_top: float) -> float:
+            c.setFillColor(colors.black)
+            c.setFont("Helvetica", 10)
+            meta_lines = [
+                f"{_tr(raw_config, 'company')}: {block['company']}",
+                f"{_tr(raw_config, 'site')}: {block['site']}",
+                f"{_tr(raw_config, 'country')}: {block['country']}",
+                f"{_tr(raw_config, 'reporting_period')}: {block['period_label']}",
+                *_stationary_document_lines(distractor_plan),
+            ]
+            meta_lines = [line for line in meta_lines if not line.endswith(": ")]
+            current_top = _draw_multiline(c, 48, current_top, meta_lines, leading=14) - 16
+
+            cards = [
+                (_tr(raw_config, "assets"), str(total_assets)),
+                (_tr(raw_config, "operating_hours"), _fmt_optional_number(total_hours, " h") or "n/a"),
+                (_tr(raw_config, "top_asset"), dominant_asset["asset_tag"] if dominant_asset else "n/a"),
+            ]
+            x = 48
+            card_y = current_top - 46
+            for title, value in cards:
+                c.setFillColor(colors.HexColor("#F2F6FA"))
+                c.roundRect(x, card_y, 150, 46, 6, stroke=0, fill=1)
+                c.setFillColor(colors.HexColor("#567389"))
+                c.setFont("Helvetica", 8)
+                c.drawString(x + 10, card_y + 30, title)
+                c.setFillColor(colors.black)
+                c.setFont("Helvetica-Bold", 12)
+                c.drawString(x + 10, card_y + 13, value)
+                x += 166
+            return card_y - 18
+
+        def render_table(current_top: float) -> float:
+            table_x = 48
+            table_top = current_top - 8
+            column_widths = [64, 136, 88, 74, 64, 48, 74]
+            headers = [
+                _tr(raw_config, "equipment_tag"),
+                _tr(raw_config, "equipment_name"),
+                _tr(raw_config, "emission_source"),
+                _tr(raw_config, "fuel_type"),
+                _tr(raw_config, "consumption"),
+                _tr(raw_config, "unit"),
+                _tr(raw_config, "operating_hours"),
+            ]
+            c.setFillColor(accent)
+            c.rect(table_x, table_top, sum(column_widths), 24, fill=1, stroke=0)
+            c.setFillColor(colors.white)
+            c.setFont("Helvetica-Bold", 8)
+            cursor = table_x + 6
+            for header, width in zip(headers, column_widths):
+                c.drawString(cursor, table_top + 8, header)
+                cursor += width
+
+            row_y = table_top - 22
+            max_quantity = max((_safe_float(asset["quantity"]) for asset in block["assets"]), default=1.0) or 1.0
+            for asset in block["assets"]:
+                c.setFillColor(colors.black)
+                c.rect(table_x, row_y, sum(column_widths), 20, fill=0, stroke=1)
+                cursor = table_x + 6
+                row_values = [
+                    asset["asset_tag"],
+                    asset["equipment_name"],
+                    asset["emission_source"],
+                    asset["fuel"],
+                    _fmt_money(asset["quantity"]),
+                    asset["unit"],
+                    _fmt_optional_number(asset["operating_hours"]),
+                ]
+                c.setFont("Helvetica", 8)
+                for value, width in zip(row_values, column_widths):
+                    c.drawString(cursor, row_y + 6, str(value))
+                    cursor += width
+                row_y -= 20
+
+            chart_y = row_y - 110
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(48, chart_y + 96, _tr(raw_config, "equipment_trend_snapshot"))
+            for idx, asset in enumerate(block["assets"][:5]):
+                bar_y = chart_y + 72 - (idx * 18)
+                bar_width = 220 * (_safe_float(asset["quantity"]) / max_quantity if max_quantity else 0)
+                c.setFont("Helvetica", 8)
+                c.drawString(48, bar_y + 4, asset["asset_tag"])
+                c.setFillColor(colors.HexColor("#DCEBF5"))
+                c.rect(110, bar_y, 220, 10, fill=1, stroke=0)
+                c.setFillColor(accent)
+                c.rect(110, bar_y, bar_width, 10, fill=1, stroke=0)
+                c.setFillColor(colors.black)
+                c.drawString(340, bar_y + 2, f"{_fmt_money(asset['quantity'])} {asset['unit']}")
+            return chart_y - 18
+
+        current_top = PAGE_H - 108
+        for section_name in (layout_plan.get("section_order") or ["meta", "table", "footer"]):
+            if section_name == "meta":
+                current_top = render_meta(current_top)
+            elif section_name == "table":
+                current_top = render_table(current_top)
+
+        c.setFont("Helvetica", 8)
+        c.setFillColor(colors.grey)
+        c.drawString(48, 42, _tr(raw_config, "dashboard_summary_footer"))
+
+    c.save()
+    return buffer.getvalue()
+
+
 def generate_bems_time_series_pdf(raw_config: dict) -> bytes:
     blocks = _build_bems_trend_exports(raw_config)
+    distractor_plan = _stationary_distractor_plan(raw_config, "PDF", document_type="bems")
+    layout_plan = _stationary_layout_plan(raw_config, "PDF", document_type="bems")
+    if layout_plan.get("enabled"):
+        return _generate_bems_time_series_pdf_variant(raw_config, blocks, layout_plan, distractor_plan)
+
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     c.setTitle(raw_config.get("document", {}).get("title", _tr(raw_config, "bems_time_series_title")))
@@ -1959,6 +3204,7 @@ def generate_bems_time_series_pdf(raw_config: dict) -> bytes:
                 f"{_tr(raw_config, 'site')}: {block['site']}",
                 f"{_tr(raw_config, 'country')}: {block['country']}",
                 f"{_tr(raw_config, 'reporting_period')}: {block['period_label']}",
+                *_stationary_document_lines(distractor_plan),
             ]
             meta_lines = [line for line in meta_lines if not line.endswith(": ")]
             _draw_multiline(c, 48, PAGE_H - 108, meta_lines, leading=14)
@@ -2031,8 +3277,124 @@ def generate_bems_time_series_pdf(raw_config: dict) -> bytes:
     return buffer.getvalue()
 
 
+def _generate_bems_time_series_pdf_variant(raw_config: dict, blocks: list[dict], layout_plan: dict, distractor_plan) -> bytes:
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.setTitle(raw_config.get("document", {}).get("title", _tr(raw_config, "bems_time_series_title")))
+    c.setSubject(raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion BEMS export"))
+
+    interval_minutes = _bems_interval_minutes(raw_config)
+    for block_index, block in enumerate(blocks):
+        rows = block["rows"]
+        page_size = 28
+        for page_start in range(0, max(len(rows), 1), page_size):
+            if block_index > 0 or page_start > 0:
+                c.showPage()
+
+            accent = colors.HexColor("#1E5B88")
+            c.setFillColor(accent)
+            c.rect(36, PAGE_H - 78, PAGE_W - 72, 34, fill=1, stroke=0)
+            c.setFillColor(colors.white)
+            c.setFont("Helvetica-Bold", 15)
+            c.drawString(48, PAGE_H - 64, _tr(raw_config, "bems_time_series_title"))
+
+            visible_rows = rows[page_start:page_start + page_size]
+
+            def render_meta(current_top: float) -> float:
+                c.setFillColor(colors.black)
+                c.setFont("Helvetica", 10)
+                meta_lines = [
+                    f"{_tr(raw_config, 'company')}: {block['company']}",
+                    f"{_tr(raw_config, 'site')}: {block['site']}",
+                    f"{_tr(raw_config, 'country')}: {block['country']}",
+                    f"{_tr(raw_config, 'reporting_period')}: {block['period_label']}",
+                    *_stationary_document_lines(distractor_plan),
+                ]
+                meta_lines = [line for line in meta_lines if not line.endswith(": ")]
+                current_top = _draw_multiline(c, 48, current_top, meta_lines, leading=14) - 16
+
+                cards = [
+                    (_tr(raw_config, "assets"), str(len(block["assets"]))),
+                    (_tr(raw_config, "interval"), f"{interval_minutes} min"),
+                    (_tr(raw_config, "rows"), str(len(rows))),
+                ]
+                x = 48
+                card_y = current_top - 46
+                for title, value in cards:
+                    c.setFillColor(colors.HexColor("#F2F6FA"))
+                    c.roundRect(x, card_y, 150, 46, 6, stroke=0, fill=1)
+                    c.setFillColor(colors.HexColor("#567389"))
+                    c.setFont("Helvetica", 8)
+                    c.drawString(x + 10, card_y + 30, title)
+                    c.setFillColor(colors.black)
+                    c.setFont("Helvetica-Bold", 12)
+                    c.drawString(x + 10, card_y + 13, value)
+                    x += 166
+                return card_y - 18
+
+            def render_table(current_top: float) -> float:
+                table_x = 48
+                table_top = current_top - 8
+                column_widths = [98, 66, 88, 180, 56, 40]
+                headers = [
+                    _tr(raw_config, "timestamp"),
+                    _tr(raw_config, "site"),
+                    _tr(raw_config, "equipment_tag"),
+                    _tr(raw_config, "sensor_name"),
+                    _tr(raw_config, "value"),
+                    _tr(raw_config, "unit"),
+                ]
+                c.setFillColor(accent)
+                c.rect(table_x, table_top, sum(column_widths), 24, fill=1, stroke=0)
+                c.setFillColor(colors.white)
+                c.setFont("Helvetica-Bold", 8)
+                cursor = table_x + 4
+                for header, width in zip(headers, column_widths):
+                    c.drawString(cursor, table_top + 8, header)
+                    cursor += width
+
+                row_y = table_top - 20
+                c.setFillColor(colors.black)
+                c.setFont("Helvetica", 7)
+                for row in visible_rows:
+                    c.rect(table_x, row_y, sum(column_widths), 18, fill=0, stroke=1)
+                    cursor = table_x + 4
+                    row_values = [
+                        row["timestamp"].strftime("%Y-%m-%d %H:%M"),
+                        row["site"],
+                        row["asset_tag"],
+                        row["sensor_name"],
+                        f"{row['value']:.2f}",
+                        row["unit"],
+                    ]
+                    for value, width in zip(row_values, column_widths):
+                        c.drawString(cursor, row_y + 5, str(value))
+                        cursor += width
+                    row_y -= 18
+                return row_y - 12
+
+            current_top = PAGE_H - 108
+            for section_name in (layout_plan.get("section_order") or ["meta", "table", "footer"]):
+                if section_name == "meta":
+                    current_top = render_meta(current_top)
+                elif section_name == "table":
+                    current_top = render_table(current_top)
+
+            c.setFont("Helvetica", 8)
+            c.setFillColor(colors.grey)
+            c.drawString(48, 42, _tr(raw_config, "time_series_footer"))
+
+    c.save()
+    return buffer.getvalue()
+
+
 def generate_bems_equipment_report_docx(raw_config: dict) -> bytes:
-    blocks = _build_bems_site_blocks(raw_config)
+    blocks = _corrupted_bems_site_blocks(raw_config)
+    distractor_plan = _stationary_distractor_plan(raw_config, "DOCX", document_type="bems")
+    layout_plan = _stationary_layout_plan(raw_config, "DOCX", document_type="bems")
+    if layout_plan.get("enabled"):
+        return _generate_bems_equipment_report_docx_variant(raw_config, blocks, layout_plan, distractor_plan)
+
     document = Document()
     core_props = document.core_properties
     core_props.title = raw_config.get("document", {}).get("title", _tr(raw_config, "bems_equipment_title"))
@@ -2046,13 +3408,22 @@ def generate_bems_equipment_report_docx(raw_config: dict) -> bytes:
             f"{_tr(raw_config, 'site')}: {block['site']}",
             f"{_tr(raw_config, 'country')}: {block['country']}",
             f"{_tr(raw_config, 'reporting_period')}: {block['period_label']}",
+            *_stationary_document_lines(distractor_plan),
         ]:
             if not line.endswith(": "):
                 document.add_paragraph(line)
 
         total_assets = len(block["assets"])
-        total_hours = sum(asset["operating_hours"] or Decimal("0") for asset in block["assets"])
-        dominant_asset = max(block["assets"], key=lambda asset: asset["quantity"], default=None)
+        total_hours = sum(
+            Decimal("0") if (asset["operating_hours"] is None or isinstance(asset["operating_hours"], str))
+            else asset["operating_hours"]
+            for asset in block["assets"]
+        )
+        dominant_asset = max(
+            (a for a in block["assets"] if not isinstance(a["quantity"], str)),
+            key=lambda asset: asset["quantity"],
+            default=None,
+        )
         summary_table = document.add_table(rows=2, cols=3)
         summary_table.style = "Table Grid"
         summary_headers = [_tr(raw_config, "assets"), _tr(raw_config, "operating_hours"), _tr(raw_config, "top_asset")]
@@ -2112,8 +3483,96 @@ def generate_bems_equipment_report_docx(raw_config: dict) -> bytes:
     return output.getvalue()
 
 
+def _generate_bems_equipment_report_docx_variant(raw_config: dict, blocks: list[dict], layout_plan: dict, distractor_plan) -> bytes:
+    document = Document()
+    core_props = document.core_properties
+    core_props.title = raw_config.get("document", {}).get("title", _tr(raw_config, "bems_equipment_title"))
+    core_props.subject = raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion BEMS export")
+
+    for block_index, block in enumerate(blocks):
+        document.add_heading(_tr(raw_config, "bems_equipment_title"), level=0)
+
+        total_assets = len(block["assets"])
+        total_hours = sum(
+            Decimal("0") if (asset["operating_hours"] is None or isinstance(asset["operating_hours"], str)) else asset["operating_hours"]
+            for asset in block["assets"]
+        )
+        dominant_asset = max(
+            (a for a in block["assets"] if not isinstance(a["quantity"], str)),
+            key=lambda asset: asset["quantity"],
+            default=None,
+        )
+
+        def render_meta() -> None:
+            for line in [
+                f"{_tr(raw_config, 'company')}: {block['company']}",
+                f"{_tr(raw_config, 'site')}: {block['site']}",
+                f"{_tr(raw_config, 'country')}: {block['country']}",
+                f"{_tr(raw_config, 'reporting_period')}: {block['period_label']}",
+                *_stationary_document_lines(distractor_plan),
+            ]:
+                if not line.endswith(": "):
+                    document.add_paragraph(line)
+
+            summary_table = document.add_table(rows=2, cols=3)
+            summary_table.style = "Table Grid"
+            for cell, value in zip(summary_table.rows[0].cells, [_tr(raw_config, "assets"), _tr(raw_config, "operating_hours"), _tr(raw_config, "top_asset")]):
+                cell.text = value
+            for cell, value in zip(summary_table.rows[1].cells, [str(total_assets), _fmt_optional_number(total_hours, " h") or "n/a", dominant_asset["asset_tag"] if dominant_asset else "n/a"]):
+                cell.text = value
+
+        def render_table() -> None:
+            document.add_paragraph(_tr(raw_config, "equipment_trend_snapshot")).runs[0].bold = True
+            rank_table = document.add_table(rows=1, cols=3)
+            rank_table.style = "Table Grid"
+            for cell, header in zip(rank_table.rows[0].cells, [_tr(raw_config, "equipment_tag"), _tr(raw_config, "consumption"), _tr(raw_config, "unit")]):
+                cell.text = header
+            for asset in sorted(block["assets"], key=lambda item: item["quantity"], reverse=True)[:5]:
+                row = rank_table.add_row().cells
+                row[0].text = asset["asset_tag"]
+                row[1].text = _fmt_money(asset["quantity"])
+                row[2].text = asset["unit"]
+
+            detail_table = document.add_table(rows=1, cols=7)
+            detail_table.style = "Table Grid"
+            for cell, header in zip(detail_table.rows[0].cells, [_tr(raw_config, "equipment_tag"), _tr(raw_config, "equipment_name"), _tr(raw_config, "emission_source"), _tr(raw_config, "fuel_type"), _tr(raw_config, "consumption"), _tr(raw_config, "unit"), _tr(raw_config, "operating_hours")]):
+                cell.text = header
+            for asset in block["assets"]:
+                row = detail_table.add_row().cells
+                row[0].text = asset["asset_tag"]
+                row[1].text = asset["equipment_name"]
+                row[2].text = asset["emission_source"]
+                row[3].text = asset["fuel"]
+                row[4].text = _fmt_money(asset["quantity"])
+                row[5].text = asset["unit"]
+                row[6].text = _fmt_optional_number(asset["operating_hours"])
+
+        def render_footer() -> None:
+            document.add_paragraph(_tr(raw_config, "dashboard_summary_footer"))
+
+        for section_name in (layout_plan.get("section_order") or ["meta", "table", "footer"]):
+            if section_name == "meta":
+                render_meta()
+            elif section_name == "table":
+                render_table()
+            elif section_name == "footer":
+                render_footer()
+
+        if block_index < len(blocks) - 1:
+            document.add_page_break()
+
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
 def generate_bems_time_series_docx(raw_config: dict) -> bytes:
     blocks = _build_bems_trend_exports(raw_config)
+    distractor_plan = _stationary_distractor_plan(raw_config, "DOCX", document_type="bems")
+    layout_plan = _stationary_layout_plan(raw_config, "DOCX", document_type="bems")
+    if layout_plan.get("enabled"):
+        return _generate_bems_time_series_docx_variant(raw_config, blocks, layout_plan, distractor_plan)
+
     document = Document()
     core_props = document.core_properties
     core_props.title = raw_config.get("document", {}).get("title", _tr(raw_config, "bems_time_series_title"))
@@ -2128,6 +3587,7 @@ def generate_bems_time_series_docx(raw_config: dict) -> bytes:
             f"{_tr(raw_config, 'site')}: {block['site']}",
             f"{_tr(raw_config, 'country')}: {block['country']}",
             f"{_tr(raw_config, 'reporting_period')}: {block['period_label']}",
+            *_stationary_document_lines(distractor_plan),
         ]:
             if not line.endswith(": "):
                 document.add_paragraph(line)
@@ -2178,8 +3638,73 @@ def generate_bems_time_series_docx(raw_config: dict) -> bytes:
     return output.getvalue()
 
 
+def _generate_bems_time_series_docx_variant(raw_config: dict, blocks: list[dict], layout_plan: dict, distractor_plan) -> bytes:
+    document = Document()
+    core_props = document.core_properties
+    core_props.title = raw_config.get("document", {}).get("title", _tr(raw_config, "bems_time_series_title"))
+    core_props.subject = raw_config.get("document", {}).get("subject", "Scope 1 stationary combustion BEMS export")
+
+    interval_minutes = _bems_interval_minutes(raw_config)
+    for block_index, block in enumerate(blocks):
+        document.add_heading(_tr(raw_config, "bems_time_series_title"), level=0)
+
+        def render_meta() -> None:
+            for line in [
+                f"{_tr(raw_config, 'company')}: {block['company']}",
+                f"{_tr(raw_config, 'site')}: {block['site']}",
+                f"{_tr(raw_config, 'country')}: {block['country']}",
+                f"{_tr(raw_config, 'reporting_period')}: {block['period_label']}",
+                *_stationary_document_lines(distractor_plan),
+            ]:
+                if not line.endswith(": "):
+                    document.add_paragraph(line)
+
+            summary_table = document.add_table(rows=2, cols=3)
+            summary_table.style = "Table Grid"
+            for cell, value in zip(summary_table.rows[0].cells, [_tr(raw_config, "assets"), _tr(raw_config, "interval"), _tr(raw_config, "rows")]):
+                cell.text = value
+            for cell, value in zip(summary_table.rows[1].cells, [str(len(block["assets"])), f"{interval_minutes} min", str(len(block["rows"]))]):
+                cell.text = value
+
+        def render_table() -> None:
+            detail_table = document.add_table(rows=1, cols=6)
+            detail_table.style = "Table Grid"
+            for cell, header in zip(detail_table.rows[0].cells, [_tr(raw_config, "timestamp"), _tr(raw_config, "site"), _tr(raw_config, "equipment_tag"), _tr(raw_config, "sensor_name"), _tr(raw_config, "value"), _tr(raw_config, "unit")]):
+                cell.text = header
+            for row_data in block["rows"]:
+                row = detail_table.add_row().cells
+                row[0].text = row_data["timestamp"].strftime("%Y-%m-%d %H:%M")
+                row[1].text = row_data["site"]
+                row[2].text = row_data["asset_tag"]
+                row[3].text = row_data["sensor_name"]
+                row[4].text = f"{row_data['value']:.2f}"
+                row[5].text = row_data["unit"]
+
+        def render_footer() -> None:
+            document.add_paragraph(_tr(raw_config, "time_series_word_footer"))
+
+        for section_name in (layout_plan.get("section_order") or ["meta", "table", "footer"]):
+            if section_name == "meta":
+                render_meta()
+            elif section_name == "table":
+                render_table()
+            elif section_name == "footer":
+                render_footer()
+
+        if block_index < len(blocks) - 1:
+            document.add_page_break()
+
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
 def generate_bems_time_series_xlsx(raw_config: dict) -> bytes:
     blocks = _build_bems_trend_exports(raw_config)
+    layout_plan = _stationary_layout_plan(raw_config, "XLSX", document_type="bems")
+    distractor_plan = _stationary_distractor_plan(raw_config, "XLSX", document_type="bems")
+    distractor_fields = _stationary_distractor_field_map(distractor_plan)
+    ordered_ids = _augment_stationary_field_ids(_ordered_stationary_field_ids(layout_plan, list(_BEMS_TIME_SERIES_HEADER_KEYS)), distractor_plan)
     workbook = openpyxl.Workbook()
     workbook.remove(workbook.active)
 
@@ -2197,33 +3722,55 @@ def generate_bems_time_series_xlsx(raw_config: dict) -> bytes:
         sheet["A5"] = _tr(raw_config, "reporting_period")
         sheet["B5"] = block["period_label"]
 
+        header_row = _write_stationary_xlsx_preamble(sheet, 6, layout_plan)
         headers = [
-            _tr(raw_config, "timestamp"),
-            _tr(raw_config, "site"),
-            _tr(raw_config, "equipment_tag"),
-            _tr(raw_config, "sensor_name"),
-            _tr(raw_config, "value"),
-            _tr(raw_config, "unit"),
+            _stationary_header_text(
+                raw_config,
+                layout_plan,
+                field_id,
+                _BEMS_TIME_SERIES_HEADER_KEYS.get(field_id, field_id),
+                distractor_fields,
+            )
+            for field_id in ordered_ids
         ]
         header_fill = PatternFill(fill_type="solid", fgColor="1E5B88")
         for column_index, header in enumerate(headers, start=1):
-            cell = sheet.cell(row=7, column=column_index, value=header)
+            cell = sheet.cell(row=header_row, column=column_index, value=header)
             cell.font = Font(color="FFFFFF", bold=True)
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal="center")
 
-        row_index = 8
+        row_index = header_row + 1
         for row in block["rows"]:
-            sheet.cell(row=row_index, column=1, value=row["timestamp"].strftime("%Y-%m-%d %H:%M"))
-            sheet.cell(row=row_index, column=2, value=row["site"])
-            sheet.cell(row=row_index, column=3, value=row["asset_tag"])
-            sheet.cell(row=row_index, column=4, value=row["sensor_name"])
-            sheet.cell(row=row_index, column=5, value=row["value"])
-            sheet.cell(row=row_index, column=6, value=row["unit"])
+            row_map = {
+                "timestamp": row["timestamp"].strftime("%Y-%m-%d %H:%M"),
+                "site": row["site"],
+                "equipment_tag": row["asset_tag"],
+                "sensor_name": row["sensor_name"],
+                "value": row["value"],
+                "unit": row["unit"],
+            }
+            values = _stationary_row_values(
+                row_map,
+                ordered_ids,
+                distractor_plan,
+                row_key=f"{row['timestamp'].isoformat()}:{row['asset_tag']}",
+                block_key=f"{block['company']}:{block['site']}",
+            )
+            for column_index, value in enumerate(values, start=1):
+                sheet.cell(row=row_index, column=column_index, value=value)
             row_index += 1
 
-        widths = [19, 20, 14, 24, 12, 8]
-        for column_index, width in enumerate(widths, start=1):
+        width_map = {
+            "timestamp": 19,
+            "site": 20,
+            "equipment_tag": 14,
+            "sensor_name": 24,
+            "value": 12,
+            "unit": 8,
+        }
+        for column_index, field_id in enumerate(ordered_ids, start=1):
+            width = width_map.get(field_id, 14)
             sheet.column_dimensions[get_column_letter(column_index)].width = width
 
     output = BytesIO()
@@ -2233,6 +3780,10 @@ def generate_bems_time_series_xlsx(raw_config: dict) -> bytes:
 
 def generate_bems_time_series_csv(raw_config: dict) -> bytes:
     blocks = _build_bems_trend_exports(raw_config)
+    layout_plan = _stationary_layout_plan(raw_config, "CSV", document_type="bems")
+    distractor_plan = _stationary_distractor_plan(raw_config, "CSV", document_type="bems")
+    distractor_fields = _stationary_distractor_field_map(distractor_plan)
+    ordered_ids = _augment_stationary_field_ids(_ordered_stationary_field_ids(layout_plan, list(_BEMS_TIME_SERIES_HEADER_KEYS)), distractor_plan)
     buffer = StringIO()
     writer = csv.writer(buffer)
 
@@ -2245,77 +3796,119 @@ def generate_bems_time_series_csv(raw_config: dict) -> bytes:
         writer.writerow([_tr(raw_config, "country"), block["country"]])
         writer.writerow([_tr(raw_config, "reporting_period"), block["period_label"]])
         writer.writerow([])
+        _write_stationary_csv_preamble(writer, layout_plan)
         writer.writerow([
-            _tr(raw_config, "timestamp"),
-            _tr(raw_config, "site"),
-            _tr(raw_config, "equipment_tag"),
-            _tr(raw_config, "sensor_name"),
-            _tr(raw_config, "value"),
-            _tr(raw_config, "unit"),
+            _stationary_header_text(
+                raw_config,
+                layout_plan,
+                field_id,
+                _BEMS_TIME_SERIES_HEADER_KEYS.get(field_id, field_id),
+                distractor_fields,
+            )
+            for field_id in ordered_ids
         ])
         for row in block["rows"]:
-            writer.writerow([
-                row["timestamp"].strftime("%Y-%m-%d %H:%M"),
-                row["site"],
-                row["asset_tag"],
-                row["sensor_name"],
-                f"{row['value']:.2f}",
-                row["unit"],
-            ])
+            row_map = {
+                "timestamp": row["timestamp"].strftime("%Y-%m-%d %H:%M"),
+                "site": row["site"],
+                "equipment_tag": row["asset_tag"],
+                "sensor_name": row["sensor_name"],
+                "value": f"{row['value']:.2f}",
+                "unit": row["unit"],
+            }
+            writer.writerow(
+                _stationary_row_values(
+                    row_map,
+                    ordered_ids,
+                    distractor_plan,
+                    row_key=f"{row['timestamp'].isoformat()}:{row['asset_tag']}",
+                    block_key=f"{block['company']}:{block['site']}",
+                )
+            )
 
     return buffer.getvalue().encode("utf-8-sig")
 
 
 def generate_bems_equipment_report_xlsx(raw_config: dict) -> bytes:
-    blocks = _build_bems_site_blocks(raw_config)
+    blocks = _corrupted_bems_site_blocks(raw_config)
+    layout_plan = _stationary_layout_plan(raw_config, "XLSX", document_type="bems")
+    distractor_plan = _stationary_distractor_plan(raw_config, "XLSX", document_type="bems")
+    distractor_fields = _stationary_distractor_field_map(distractor_plan)
+    ordered_ids = _ordered_stationary_field_ids(layout_plan, list(_BEMS_EQUIPMENT_HEADER_KEYS))
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = _tr(raw_config, "bems_summary_sheet_title")
     sheet["A1"] = _tr(raw_config, "bems_equipment_title")
     sheet["A1"].font = Font(size=14, bold=True)
 
+    header_row = _write_stationary_xlsx_preamble(sheet, 2, layout_plan)
+    header_keys = {
+        "company": "company",
+        "site": "site",
+        "country": "country",
+        "reporting_period": "reporting_period",
+        **_BEMS_EQUIPMENT_HEADER_KEYS,
+    }
+    default_ids = _augment_stationary_field_ids(["company", "site", "country", "reporting_period", *ordered_ids], distractor_plan)
     headers = [
-        _tr(raw_config, "company"),
-        _tr(raw_config, "site"),
-        _tr(raw_config, "country"),
-        _tr(raw_config, "reporting_period"),
-        _tr(raw_config, "equipment_tag"),
-        _tr(raw_config, "equipment_name"),
-        _tr(raw_config, "emission_source"),
-        _tr(raw_config, "fuel_type"),
-        _tr(raw_config, "consumption"),
-        _tr(raw_config, "unit"),
-        _tr(raw_config, "operating_hours"),
+        _stationary_header_text(
+            raw_config,
+            layout_plan,
+            field_id,
+            header_keys.get(field_id, field_id),
+            distractor_fields,
+        )
+        for field_id in default_ids
     ]
     header_fill = PatternFill(fill_type="solid", fgColor="1E5B88")
     for column_index, header in enumerate(headers, start=1):
-        cell = sheet.cell(row=3, column=column_index, value=header)
+        cell = sheet.cell(row=header_row, column=column_index, value=header)
         cell.font = Font(color="FFFFFF", bold=True)
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center")
 
-    row_index = 4
+    row_index = header_row + 1
     for block in blocks:
         for asset in block["assets"]:
-            values = [
-                block["company"],
-                block["site"],
-                block["country"],
-                block["period_label"],
-                asset["asset_tag"],
-                asset["equipment_name"],
-                asset["emission_source"],
-                asset["fuel"],
-                float(asset["quantity"]),
-                asset["unit"],
-                None if asset["operating_hours"] is None else float(asset["operating_hours"]),
-            ]
+            row_map = {
+                "company": block["company"],
+                "site": block["site"],
+                "country": block["country"],
+                "reporting_period": block["period_label"],
+                "equipment_tag": asset["asset_tag"],
+                "equipment_name": asset["equipment_name"],
+                "emission_source": asset["emission_source"],
+                "fuel_type": asset["fuel"],
+                "consumption": _safe_float(asset["quantity"]),
+                "unit": asset["unit"],
+                "operating_hours": None if asset["operating_hours"] is None else _safe_float(asset["operating_hours"]),
+            }
+            values = _stationary_row_values(
+                row_map,
+                default_ids,
+                distractor_plan,
+                row_key=str(asset["asset_tag"] or "asset-row"),
+                block_key=f"{block['company']}:{block['site']}",
+            )
             for column_index, value in enumerate(values, start=1):
                 sheet.cell(row=row_index, column=column_index, value=value)
             row_index += 1
 
-    widths = [24, 20, 16, 18, 14, 22, 20, 16, 14, 8, 16]
-    for column_index, width in enumerate(widths, start=1):
+    width_map = {
+        "company": 24,
+        "site": 20,
+        "country": 16,
+        "reporting_period": 18,
+        "equipment_tag": 14,
+        "equipment_name": 22,
+        "emission_source": 20,
+        "fuel_type": 16,
+        "consumption": 14,
+        "unit": 8,
+        "operating_hours": 16,
+    }
+    for column_index, field_id in enumerate(default_ids, start=1):
+        width = width_map.get(field_id, 14)
         sheet.column_dimensions[get_column_letter(column_index)].width = width
 
     output = BytesIO()
@@ -2324,36 +3917,55 @@ def generate_bems_equipment_report_xlsx(raw_config: dict) -> bytes:
 
 
 def generate_bems_equipment_report_csv(raw_config: dict) -> bytes:
-    blocks = _build_bems_site_blocks(raw_config)
+    blocks = _corrupted_bems_site_blocks(raw_config)
+    layout_plan = _stationary_layout_plan(raw_config, "CSV", document_type="bems")
+    distractor_plan = _stationary_distractor_plan(raw_config, "CSV", document_type="bems")
+    distractor_fields = _stationary_distractor_field_map(distractor_plan)
+    ordered_ids = _ordered_stationary_field_ids(layout_plan, list(_BEMS_EQUIPMENT_HEADER_KEYS))
     buffer = StringIO()
     writer = csv.writer(buffer)
+    header_keys = {
+        "company": "company",
+        "site": "site",
+        "country": "country",
+        "reporting_period": "reporting_period",
+        **_BEMS_EQUIPMENT_HEADER_KEYS,
+    }
+    default_ids = _augment_stationary_field_ids(["company", "site", "country", "reporting_period", *ordered_ids], distractor_plan)
+    _write_stationary_csv_preamble(writer, layout_plan)
     writer.writerow([
-        _tr(raw_config, "company"),
-        _tr(raw_config, "site"),
-        _tr(raw_config, "country"),
-        _tr(raw_config, "reporting_period"),
-        _tr(raw_config, "equipment_tag"),
-        _tr(raw_config, "equipment_name"),
-        _tr(raw_config, "emission_source"),
-        _tr(raw_config, "fuel_type"),
-        _tr(raw_config, "consumption"),
-        _tr(raw_config, "unit"),
-        _tr(raw_config, "operating_hours"),
+        _stationary_header_text(
+            raw_config,
+            layout_plan,
+            field_id,
+            header_keys.get(field_id, field_id),
+            distractor_fields,
+        )
+        for field_id in default_ids
     ])
     for block in blocks:
         for asset in block["assets"]:
-            writer.writerow([
-                block["company"],
-                block["site"],
-                block["country"],
-                block["period_label"],
-                asset["asset_tag"],
-                asset["equipment_name"],
-                asset["emission_source"],
-                asset["fuel"],
-                f"{float(asset['quantity']):.2f}",
-                asset["unit"],
-                "" if asset["operating_hours"] is None else f"{float(asset['operating_hours']):.2f}",
-            ])
+            row_map = {
+                "company": block["company"],
+                "site": block["site"],
+                "country": block["country"],
+                "reporting_period": block["period_label"],
+                "equipment_tag": asset["asset_tag"],
+                "equipment_name": asset["equipment_name"],
+                "emission_source": asset["emission_source"],
+                "fuel_type": asset["fuel"],
+                "consumption": _fmt_num(asset["quantity"], ".2f"),
+                "unit": asset["unit"],
+                "operating_hours": "" if asset["operating_hours"] is None else _fmt_num(asset["operating_hours"], ".2f"),
+            }
+            writer.writerow(
+                _stationary_row_values(
+                    row_map,
+                    default_ids,
+                    distractor_plan,
+                    row_key=str(asset["asset_tag"] or "asset-row"),
+                    block_key=f"{block['company']}:{block['site']}",
+                )
+            )
 
     return buffer.getvalue().encode("utf-8-sig")

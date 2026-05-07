@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from utils.document_catalog import document_type_requires_company_currency
 
-_STATIONARY_DOCUMENT_TYPES_WITH_CURRENCY = {"fuel_invoice", "fuel_card"}
+
+def _layout_seed_value(form_data: dict):
+    seed_value = form_data.get("doc_layout_seed")
+    if seed_value in (None, ""):
+        return None
+    return int(seed_value)
 
 
 def build_raw_config(
@@ -27,6 +33,19 @@ def build_raw_config(
             "noise_level": float(form_data.get("doc_noise", 0.0)),
             "monthly_zip": bool(form_data.get("doc_monthly_zip", False)),
             "inject_special_chars": bool(form_data.get("doc_inject_special_chars", False)),
+            "distractor_fields": {
+                "enabled": bool(form_data.get("doc_distractor_fields_enabled", False)),
+            },
+            "layout": {
+                "enabled": bool(form_data.get("doc_layout_enabled", False)),
+                "preset": str(form_data.get("doc_layout_preset", "balanced") or "balanced"),
+                "seed": _layout_seed_value(form_data),
+            },
+            "invalid_data": {
+                "enabled": bool(form_data.get("doc_invalid_data_enabled", False)),
+                "preset": str(form_data.get("doc_invalid_data_preset", "mixed")),
+                "rate": int(form_data.get("doc_invalid_data_rate", 15)) / 100.0,
+            },
         },
         "xlsx_include_summary": form_data.get("xlsx_include_summary", False),
         "financial_period": {
@@ -361,7 +380,7 @@ def validate_raw_config_stationary(raw_config: dict) -> list[str]:
             ("supplier_code", "Supplier code"),
             ("customer", "Customer name"),
         ]
-        if document_type in _STATIONARY_DOCUMENT_TYPES_WITH_CURRENCY:
+        if document_type_requires_company_currency("stationary_combustion", document_type):
             required_company_fields.append(("currency", "Currency"))
 
         for field, label in required_company_fields:

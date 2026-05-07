@@ -12,7 +12,20 @@ import streamlit as st
 from components.electricity.electricity_bill import render_electricity_bill_form
 from components.electricity.smart_meter_data import render_smart_meter_data_form
 from components.electricity.supplier_portal_data import render_electricity_supplier_portal_data_form
+from components.distractor_fields_controls import (
+    collect_distractor_field_form_data as _collect_distractor_fields,
+    render_distractor_field_controls as _render_distractor_field_controls,
+)
+from components.invalid_data_controls import (
+    collect_invalid_data_form_data as _collect_invalid_data,
+    render_invalid_data_controls as _render_invalid_data_controls,
+)
+from components.layout_controls import (
+    collect_layout_form_data as _collect_layout,
+    render_layout_controls as _render_layout_controls,
+)
 from components.sidebar import NEW_COMPANY_PLACEHOLDER, get_document_type_config
+from utils.document_catalog import supports_monthly_zip_export
 from utils.currency import (
     CURRENCY_DISPLAY as _CURRENCY_DISPLAY,
     currency_code as _currency_code,
@@ -149,7 +162,7 @@ def _render_document_settings(category: str, document_type: str | None) -> None:
                 help="Controls background texture and page skew intensity.",
             )
 
-        if document_type == "electricity_bill" and output_format in {"PDF", "DOCX"}:
+        if supports_monthly_zip_export(category, document_type or "", output_format):
             st.checkbox(
                 "Generate one file per month and export as ZIP",
                 key="doc_monthly_zip",
@@ -170,6 +183,11 @@ def _render_document_settings(category: str, document_type: str | None) -> None:
                 key="xlsx_split_by_company",
                 help="Generate a separate billing detail sheet for each company instead of one combined sheet.",
             )
+
+        _render_distractor_field_controls()
+        _render_layout_controls()
+        st.divider()
+        _render_invalid_data_controls()
 
 
 def _rand_financial_period() -> tuple[date, date, str]:
@@ -588,7 +606,7 @@ def _render_electricity_site_form(i: int, j: int, fp_months: list[tuple[int, int
     st.session_state[f"elec_site_{i}_{j}_total_quantity_omit"] = False
     col1, col2 = st.columns(2)
     with col1:
-        _field(st.text_input, "Site Label", f"elec_site_{i}_{j}_label", value=_elec_site_default(i, j, "label", ""))
+        _field(st.text_input, "Site Label", f"elec_site_{i}_{j}_label", value=_elec_site_default(i, j, "label", ""), omit_default=True)
         st.text_area("Customer Address", key=f"elec_site_{i}_{j}_address", value=_elec_site_default(i, j, "address", ""), height=104)
         _field(st.text_input, "City", f"elec_site_{i}_{j}_city", value=_elec_site_default(i, j, "city", ""))
         _field(st.text_input, "Postcode", f"elec_site_{i}_{j}_postcode", value=_elec_site_default(i, j, "postcode", ""))
@@ -823,7 +841,7 @@ def _collect_electricity_form_data(document_type: str | None) -> dict:
                 ]
 
             sites.append({
-                "label": s.get(f"elec_site_{i}_{j}_label", "") or f"Site {j + 1}",
+                "label": str(s.get(f"elec_site_{i}_{j}_label", "")).strip(),
                 "customer_address": [line for line in s.get(f"elec_site_{i}_{j}_address", "").split("\n") if line.strip()],
                 "city": s.get(f"elec_site_{i}_{j}_city", ""),
                 "postcode": s.get(f"elec_site_{i}_{j}_postcode", ""),
@@ -878,6 +896,9 @@ def _collect_electricity_form_data(document_type: str | None) -> dict:
         "xlsx_include_summary": bool(s.get("xlsx_include_summary", False)),
         "xlsx_split_by_company": bool(s.get("xlsx_split_by_company", False)),
         "companies": companies,
+        **_collect_distractor_fields(s),
+        **_collect_layout(s),
+        **_collect_invalid_data(s),
     }
 
 

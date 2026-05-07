@@ -9,6 +9,18 @@ from datetime import date
 
 import streamlit as st
 
+from components.distractor_fields_controls import (
+    collect_distractor_field_form_data as _collect_distractor_fields,
+    render_distractor_field_controls as _render_distractor_field_controls,
+)
+from components.invalid_data_controls import (
+    collect_invalid_data_form_data as _collect_invalid_data,
+    render_invalid_data_controls as _render_invalid_data_controls,
+)
+from components.layout_controls import (
+    collect_layout_form_data as _collect_layout,
+    render_layout_controls as _render_layout_controls,
+)
 from components.sidebar import NEW_COMPANY_PLACEHOLDER, get_document_type_config
 from components.stationary_combustion.bems import (
     bems_report_type_value as _bems_report_type_value_module,
@@ -36,6 +48,7 @@ from components.stationary_combustion.units import (
     default_fuel_volume_unit,
     option_index,
 )
+from utils.document_catalog import document_type_requires_company_currency
 from utils.currency import (
     CURRENCY_DISPLAY as _CURRENCY_DISPLAY,
     currency_code as _currency_code,
@@ -54,8 +67,6 @@ _BEMS_REPORT_TYPES: dict[str, str] = {
     "Equipment Trend Report": "equipment_trend_report",
     "Time-Series Trend Export": "time_series_trend_export",
 }
-
-_DOCUMENT_TYPES_WITH_CURRENCY = {"fuel_invoice", "fuel_card"}
 
 _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config")
 
@@ -253,6 +264,11 @@ def _render_document_settings(document_type: str | None) -> None:
                 key="doc_noise",
                 help="Retained for consistency with other document generators.",
             )
+
+        _render_distractor_field_controls()
+        _render_layout_controls()
+        st.divider()
+        _render_invalid_data_controls()
 
 
 def _render_financial_period() -> None:
@@ -862,7 +878,7 @@ def _render_company(i: int, document_type: str | None) -> None:
         customer_label = "Account Holder" if document_type == "fuel_card" else "Bill To / Customer"
         st.text_input(customer_label, value=_company_default(i, "customer", document_type=document_type), key=f"stationary_co_{i}_customer")
         st.text_input("Customer Code", value=_company_default(i, "customer_code", document_type=document_type), key=f"stationary_co_{i}_customer_code")
-        if document_type in _DOCUMENT_TYPES_WITH_CURRENCY:
+        if document_type_requires_company_currency("stationary_combustion", document_type or ""):
             st.selectbox(
                 "Currency",
                 options=_currency_options(),
@@ -1142,7 +1158,7 @@ def _collect_companies(document_type: str | None) -> list[dict]:
             "customer_code": s.get(f"stationary_co_{i}_customer_code", ""),
             "currency": (
                 s.get(f"stationary_co_{i}_currency", "GBP (£)")
-                if document_type in _DOCUMENT_TYPES_WITH_CURRENCY
+                if document_type_requires_company_currency("stationary_combustion", document_type or "")
                 else ""
             ),
             "merchant": s.get(f"stationary_co_{i}_merchant", ""),
@@ -1203,4 +1219,7 @@ def render_stationary_combustion_form(document_type: str | None) -> dict:
         "bems_interval_minutes": int(str(s.get("stationary_bems_interval_label", "60 minutes")).split()[0]),
         "bems_report_type": _bems_report_type_value_module(_BEMS_REPORT_TYPES),
         "companies": _collect_companies(document_type),
+        **_collect_distractor_fields(s),
+        **_collect_layout(s),
+        **_collect_invalid_data(s),
     }

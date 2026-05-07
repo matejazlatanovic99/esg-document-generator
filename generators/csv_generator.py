@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from utils.currency import currency_code
+from utils.distractor_fields import resolve_tabular_value
 
 # ── translations ───────────────────────────────────────────────────────────────
 # Reuses the same column-header keys as the XLSX generator.
@@ -241,63 +242,104 @@ ELECTRICITY_TRANSLATIONS: dict[str, dict[str, str]] = {
     },
 }
 
-# Column spec: (header_key, record_accessor)
-# accessor is a callable (company, site, rec) -> value
-_COLUMN_SPEC: list[tuple[str, Any]] = [
-    ("col_invoice_no",   lambda co, si, r: r["invoice_no"]),
-    ("col_company",      lambda co, si, r: co["label"]),
-    ("col_site",         lambda co, si, r: si["label"]),
-    ("col_city",         lambda co, si, r: r["city"]),
-    ("col_postcode",     lambda co, si, r: r["postcode"]),
-    ("col_meter_id",     lambda co, si, r: r["meter_id"]),
-    ("col_period",       lambda co, si, r: r["billing_period_label"]),
-    ("col_period_start", lambda co, si, r: _fmt_date(r["period_start"])),
-    ("col_period_end",   lambda co, si, r: _fmt_date(r["period_end"])),
-    ("col_issue_date",   lambda co, si, r: _fmt_date(r["issue_date"])),
-    ("col_due_date",     lambda co, si, r: _fmt_date(r["due_date"])),
-    ("col_prev_read",    lambda co, si, r: r["prev_read"]),
-    ("col_curr_read",    lambda co, si, r: r["curr_read"]),
-    ("col_consumption",  lambda co, si, r: r["consumption"]),
-    ("col_unit_price",   lambda co, si, r: _fmt_decimal(r["unit_price"], 4)),
-    ("col_heat_cost",    lambda co, si, r: _fmt_decimal(r["heat_cost"], 2)),
-    ("col_capacity",     lambda co, si, r: r["capacity_kw"]),
-    ("col_cap_rate",     lambda co, si, r: _fmt_decimal(r["capacity_rate"], 2)),
-    ("col_supplier_ef",  lambda co, si, r: _fmt_decimal(r["supplier_ef"], 4)),
-    ("col_cap_charge",   lambda co, si, r: _fmt_decimal(r["capacity_charge"], 2)),
-    ("col_subtotal",     lambda co, si, r: _fmt_decimal(r["subtotal"], 2)),
-    ("col_vat",          lambda co, si, r: _fmt_decimal(r["vat"], 2)),
-    ("col_total",        lambda co, si, r: _fmt_decimal(r["total"], 2)),
-    ("col_currency",     lambda co, si, r: currency_code(co.get("currency"))),
+_HEAT_COLUMN_SPECS: list[tuple[str, str, str | None, Any]] = [
+    ("invoice_no", "col_invoice_no", "invoice_no", lambda co, si, r: r["invoice_no"]),
+    ("company", "col_company", None, lambda co, si, r: co["label"]),
+    ("site", "col_site", "site_label", lambda co, si, r: si["label"]),
+    ("city", "col_city", "city", lambda co, si, r: r["city"]),
+    ("postcode", "col_postcode", "postcode", lambda co, si, r: r["postcode"]),
+    ("meter_id", "col_meter_id", "meter_id", lambda co, si, r: r["meter_id"]),
+    ("period", "col_period", None, lambda co, si, r: r["billing_period_label"]),
+    ("period_start", "col_period_start", None, lambda co, si, r: _fmt_date(r["period_start"])),
+    ("period_end", "col_period_end", None, lambda co, si, r: _fmt_date(r["period_end"])),
+    ("issue_date", "col_issue_date", None, lambda co, si, r: _fmt_date(r["issue_date"])),
+    ("due_date", "col_due_date", None, lambda co, si, r: _fmt_date(r["due_date"])),
+    ("prev_read", "col_prev_read", "prev_read", lambda co, si, r: r["prev_read"]),
+    ("curr_read", "col_curr_read", "curr_read", lambda co, si, r: r["curr_read"]),
+    ("consumption", "col_consumption", "consumption", lambda co, si, r: r["consumption"]),
+    ("unit_price", "col_unit_price", "unit_price", lambda co, si, r: _fmt_decimal(r["unit_price"], 4)),
+    ("heat_cost", "col_heat_cost", "heat_cost", lambda co, si, r: _fmt_decimal(r["heat_cost"], 2)),
+    ("capacity", "col_capacity", "capacity_kw", lambda co, si, r: r["capacity_kw"]),
+    ("cap_rate", "col_cap_rate", "capacity_rate", lambda co, si, r: _fmt_decimal(r["capacity_rate"], 2)),
+    ("supplier_ef", "col_supplier_ef", "supplier_ef", lambda co, si, r: _fmt_decimal(r["supplier_ef"], 4)),
+    ("cap_charge", "col_cap_charge", "capacity_charge", lambda co, si, r: _fmt_decimal(r["capacity_charge"], 2)),
+    ("subtotal", "col_subtotal", None, lambda co, si, r: _fmt_decimal(r["subtotal"], 2)),
+    ("vat", "col_vat", None, lambda co, si, r: _fmt_decimal(r["vat"], 2)),
+    ("total", "col_total", None, lambda co, si, r: _fmt_decimal(r["total"], 2)),
+    ("currency", "col_currency", None, lambda co, si, r: currency_code(co.get("currency"))),
 ]
 
-# Maps column header key → record field name for blank_fields checking
-_BLANK_FIELD_MAP: dict[str, str] = {
-    "col_invoice_no":   "invoice_no",
-    "col_site":         "site_label",
-    "col_city":         "city",
-    "col_postcode":     "postcode",
-    "col_meter_id":     "meter_id",
-    "col_prev_read":    "prev_read",
-    "col_curr_read":    "curr_read",
-    "col_consumption":  "consumption",
-    "col_unit_price":   "unit_price",
-    "col_heat_cost":    "heat_cost",
-    "col_capacity":     "capacity_kw",
-    "col_cap_rate":     "capacity_rate",
-    "col_supplier_ef":  "supplier_ef",
-    "col_cap_charge":   "capacity_charge",
+_HEAT_COLUMN_MAP = {field_id: (header_key, blank_field, accessor) for field_id, header_key, blank_field, accessor in _HEAT_COLUMN_SPECS}
+
+_ELECTRICITY_COLUMN_SPECS: list[tuple[str, str, Any]] = [
+    ("reference", "xl_col_ref", lambda co, si: si["ref_no"]),
+    ("company", "xl_col_company", lambda co, si: co["label"]),
+    ("site", "xl_col_site", lambda co, si: si["label"]),
+    ("period", "xl_col_period", lambda co, si: si["billing_period_label"]),
+    ("period_start", "meta_period_start", lambda co, si: _fmt_date(si["period_start"])),
+    ("period_end", "meta_period_end", lambda co, si: _fmt_date(si["period_end"])),
+    ("city", "xl_col_city", lambda co, si: si["city"]),
+    ("postcode", "xl_col_postcode", lambda co, si: si["postcode"]),
+    ("meter_id", "xl_col_meter_id", lambda co, si: si["meter_id"]),
+    ("supplier_ef", "xl_col_supplier_ef", lambda co, si: si["supplier_ef"] if isinstance(si["supplier_ef"], str) else f"{float(si['supplier_ef']):.4f}"),
+    ("unit", "xl_col_unit", lambda co, si: si["unit"]),
+    ("start_read", "xl_col_start_read", lambda co, si: si["start_reading"]),
+    ("end_read", "xl_col_end_read", lambda co, si: si["end_reading"]),
+    ("total_qty", "xl_col_total_qty", lambda co, si: si["total_quantity"] if isinstance(si["total_quantity"], str) else f"{float(si['total_quantity']):.2f}"),
+    ("total_cost", "xl_col_total_cost", lambda co, si: si["total_cost"] if isinstance(si["total_cost"], str) else f"{float(si['total_cost']):.2f}"),
+    ("currency", "xl_col_currency", lambda co, si: currency_code(co.get("currency"))),
+    ("emissions_kg", "xl_col_emissions_kg", lambda co, si: si["emissions_kg"] if isinstance(si.get("emissions_kg"), str) else f"{float(si['emissions_kg']):.2f}"),
+    ("emissions_t", "xl_col_emissions_t", lambda co, si: si["emissions_t"] if isinstance(si.get("emissions_t"), str) else f"{float(si['emissions_t']):.3f}"),
+]
+
+_ELECTRICITY_COLUMN_MAP = {field_id: (header_key, accessor) for field_id, header_key, accessor in _ELECTRICITY_COLUMN_SPECS}
+
+_SMART_METER_MONTHLY_SPEC: list[tuple[str, str, Any]] = [
+    ("meter_id", "xl_col_meter_id", lambda row: row["meter_id"]),
+    ("site", "xl_col_site", lambda row: row["site_label"]),
+    ("period", "xl_col_period", lambda row: row["period_label"]),
+    ("start_read", "xl_col_start_read", lambda row: row["start_reading"]),
+    ("end_read", "xl_col_end_read", lambda row: row["end_reading"]),
+    ("consumption", "sm_col_consumption", lambda row: f"{float(row['consumption']):.2f}"),
+    ("unit", "xl_col_unit", lambda row: row["unit"]),
+    ("tariff_type", "sm_col_tariff_type", lambda row: row["tariff_type"]),
+    ("tariff_cost", "xl_tariff_cost", lambda row: "" if row["cost"] in ("", None) else f"{float(row['cost']):.2f}"),
+    ("currency", "xl_col_currency", lambda row: row["currency"]),
+]
+
+_SMART_METER_INTERVAL_SPECS: dict[str, list[tuple[str, str, Any]]] = {
+    "consumption_diff": [
+        ("meter_id", "xl_col_meter_id", lambda row: row["meter_id"]),
+        ("timestamp", "sm_col_timestamp", lambda row: row["timestamp"]),
+        ("import_kwh", "sm_col_import_kwh", lambda row: f"{float(row['import_kwh']):.4f}"),
+        ("export_kwh", "sm_col_export_kwh", lambda row: f"{float(row['export_kwh']):.4f}"),
+        ("unit", "xl_col_unit", lambda row: row["unit"]),
+    ],
+    "cumulative_end_reading": [
+        ("meter_id", "xl_col_meter_id", lambda row: row["meter_id"]),
+        ("timestamp", "sm_col_timestamp", lambda row: row["timestamp"]),
+        ("end_read", "sm_col_end_reading", lambda row: f"{float(row['end_reading']):.4f}"),
+        ("unit", "xl_col_unit", lambda row: row["unit"]),
+    ],
 }
 
 
-def _fmt_date(value: date) -> str:
-    return value.isoformat()
+def _fmt_date(value) -> str:
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
 
 
 def _fmt_decimal(value, places: int) -> str:
-    if not isinstance(value, Decimal):
-        value = Decimal(str(value))
-    quantizer = Decimal("1." + "0" * places)
-    return str(value.quantize(quantizer))
+    if isinstance(value, str):
+        return value
+    try:
+        if not isinstance(value, Decimal):
+            value = Decimal(str(value))
+        quantizer = Decimal("1." + "0" * places)
+        return str(value.quantize(quantizer))
+    except Exception:
+        return str(value)
 
 
 def _currency_label_for_sections(sections: list[dict]) -> str:
@@ -309,6 +351,99 @@ def _replace_currency_labels(strings: dict[str, str], currency_label: str) -> di
     return {key: value.replace("£", currency_label) for key, value in strings.items()}
 
 
+def _layout_plan(config: dict) -> dict:
+    return config.get("document", {}).get("layout_plan", {})
+
+
+def _distractor_plan(config: dict):
+    return config.get("document", {}).get("distractor_plan")
+
+
+def _ordered_ids(plan: dict, available_ids: list[str]) -> list[str]:
+    excluded = set(plan.get("excluded_fields") or [])
+    available_ids = [field_id for field_id in available_ids if field_id not in excluded]
+    requested = list(plan.get("column_order") or [])
+    if not requested:
+        return available_ids
+    ordered = [field_id for field_id in requested if field_id in available_ids]
+    ordered.extend(field_id for field_id in available_ids if field_id not in ordered)
+    return ordered
+
+
+def _header_text(strings: dict[str, str], plan: dict, field_id: str, header_key: str) -> str:
+    return str((plan.get("header_aliases") or {}).get(field_id, strings[header_key]))
+
+
+def _write_layout_prefix(writer, plan: dict) -> None:
+    for row in plan.get("preamble_rows") or []:
+        writer.writerow(row)
+    for _ in range(int(plan.get("header_row_offset", 0))):
+        writer.writerow([])
+
+
+def _ordered_tabular_ids(base_field_ids: list[str], distractor_plan) -> list[str]:
+    ordered = list(base_field_ids)
+    if not distractor_plan or not getattr(distractor_plan, "enabled", False):
+        return ordered
+    for field in distractor_plan.tabular_fields:
+        insert_at = len(ordered)
+        if field.anchor in ordered:
+            anchor_index = ordered.index(field.anchor)
+            insert_at = anchor_index + 1 if field.position == "after" else anchor_index
+        ordered.insert(insert_at, field.field_id)
+    return ordered
+
+
+def _distractor_field_map(distractor_plan) -> dict[str, Any]:
+    if not distractor_plan or not getattr(distractor_plan, "enabled", False):
+        return {}
+    return {field.field_id: field for field in distractor_plan.tabular_fields}
+
+
+def _heat_row_key(company: dict, site: dict, rec: dict) -> str:
+    del company, site
+    return str(rec.get("invoice_no") or rec.get("billing_period_label") or "heat-row")
+
+
+def _electricity_row_key(company: dict, site: dict) -> str:
+    del company
+    return str(site.get("ref_no") or site.get("meter_id") or site.get("billing_period_label") or "electricity-row")
+
+
+def _smart_meter_row_key(row: dict) -> str:
+    return str(row.get("timestamp") or row.get("period_label") or row.get("meter_id") or "smart-meter-row")
+
+
+def _electricity_tariff_headers(strings: dict[str, str], max_tariffs: int) -> list[str]:
+    headers: list[str] = []
+    for idx in range(max_tariffs):
+        prefix = f"Tariff {idx + 1}"
+        headers.extend([
+            f"{prefix}: {strings['xl_tariff_name']}",
+            f"{prefix}: {strings['xl_tariff_qty']}",
+            f"{prefix}: {strings['xl_tariff_rate']}",
+            f"{prefix}: {strings['xl_tariff_cost']}",
+        ])
+    return headers
+
+
+def _electricity_tariff_row(site: dict, max_tariffs: int) -> list[str]:
+    row: list[str] = []
+    tariffs = site.get("tariffs", [])
+    for idx in range(max_tariffs):
+        if idx < len(tariffs):
+            tariff = tariffs[idx]
+            row.extend([
+                tariff["name"],
+                tariff["quantity"] if isinstance(tariff["quantity"], str) else f"{float(tariff['quantity']):.2f}",
+                tariff["unit_cost"] if isinstance(tariff["unit_cost"], str) else f"{float(tariff['unit_cost']):.4f}",
+                tariff["cost"] if isinstance(tariff["cost"], str) else f"{float(tariff['cost']):.2f}",
+            ])
+        else:
+            row.extend(["", "", "", ""])
+    return row
+
+
 def _generate_heat_csv(
     config: dict,
     sections: list[dict],
@@ -318,11 +453,19 @@ def _generate_heat_csv(
     lang = config["document"].get("language", "en")
     strings = _replace_currency_labels(TRANSLATIONS.get(lang, TRANSLATIONS["en"]), _currency_label_for_sections(sections))
     omit = blank_fields or set()
+    plan = _layout_plan(config)
+    distractor_plan = _distractor_plan(config)
+    distractor_fields = _distractor_field_map(distractor_plan)
+    ordered_field_ids = _ordered_tabular_ids(_ordered_ids(plan, list(_HEAT_COLUMN_MAP)), distractor_plan)
 
-    headers = [strings[key] for key, _ in _COLUMN_SPEC]
+    headers = [
+        distractor_fields[field_id].label if field_id in distractor_fields else _header_text(strings, plan, field_id, _HEAT_COLUMN_MAP[field_id][0])
+        for field_id in ordered_field_ids
+    ]
 
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
+    _write_layout_prefix(writer, plan)
     writer.writerow(headers)
 
     for section in sections:
@@ -330,8 +473,11 @@ def _generate_heat_csv(
         site = section["site"]
         for rec in section["records"]:
             row = []
-            for key, accessor in _COLUMN_SPEC:
-                blank_field = _BLANK_FIELD_MAP.get(key)
+            for field_id in ordered_field_ids:
+                if field_id in distractor_fields:
+                    row.append(resolve_tabular_value(distractor_plan, distractor_fields[field_id], _heat_row_key(company, site, rec)))
+                    continue
+                _, blank_field, accessor = _HEAT_COLUMN_MAP[field_id]
                 if blank_field and blank_field in omit:
                     row.append("")
                 else:
@@ -344,79 +490,46 @@ def _generate_heat_csv(
 def _generate_electricity_csv(config: dict, sections: list[dict]) -> bytes:
     lang = config["document"].get("language", "en")
     strings = ELECTRICITY_TRANSLATIONS.get(lang, ELECTRICITY_TRANSLATIONS["en"])
+    plan = _layout_plan(config)
+    distractor_plan = _distractor_plan(config)
+    distractor_fields = _distractor_field_map(distractor_plan)
 
     buf = io.StringIO()
     writer = csv.writer(buf)
+    _write_layout_prefix(writer, plan)
 
     max_tariffs = max((len(section["site"].get("tariffs", [])) for section in sections), default=0)
-
-    headers = [
-        strings["xl_col_ref"],
-        strings["xl_col_company"],
-        strings["xl_col_site"],
-        strings["xl_col_period"],
-        strings["meta_period_start"],
-        strings["meta_period_end"],
-        strings["xl_col_city"],
-        strings["xl_col_postcode"],
-        strings["xl_col_meter_id"],
-        strings["xl_col_supplier_ef"],
-        strings["xl_col_unit"],
-        strings["xl_col_start_read"],
-        strings["xl_col_end_read"],
-        strings["xl_col_total_qty"],
-        strings["xl_col_total_cost"],
-        strings["xl_col_currency"],
-        strings["xl_col_emissions_kg"],
-        strings["xl_col_emissions_t"],
-    ]
-    for idx in range(max_tariffs):
-        prefix = f"Tariff {idx + 1}"
-        headers += [
-            f"{prefix}: {strings['xl_tariff_name']}",
-            f"{prefix}: {strings['xl_tariff_qty']}",
-            f"{prefix}: {strings['xl_tariff_rate']}",
-            f"{prefix}: {strings['xl_tariff_cost']}",
-        ]
+    ordered_field_ids = _ordered_tabular_ids(_ordered_ids(plan, list(_ELECTRICITY_COLUMN_MAP)), distractor_plan)
+    headers: list[str] = []
+    tariff_inserted = False
+    for field_id in ordered_field_ids:
+        if field_id in distractor_fields:
+            headers.append(distractor_fields[field_id].label)
+        else:
+            headers.append(_header_text(strings, plan, field_id, _ELECTRICITY_COLUMN_MAP[field_id][0]))
+        if field_id == "total_qty" and plan.get("tariff_block_position") == "after_total_qty":
+            headers.extend(_electricity_tariff_headers(strings, max_tariffs))
+            tariff_inserted = True
+    if not tariff_inserted:
+        headers.extend(_electricity_tariff_headers(strings, max_tariffs))
     writer.writerow(headers)
 
     for section in sections:
         company = section["company"]
         site = section["site"]
-        period_start = site["period_start"]
-        period_end = site["period_end"]
-        row = [
-            site["ref_no"],
-            company["label"],
-            site["label"],
-            site["billing_period_label"],
-            period_start.strftime("%Y-%m-%d") if hasattr(period_start, "strftime") else str(period_start),
-            period_end.strftime("%Y-%m-%d") if hasattr(period_end, "strftime") else str(period_end),
-            site["city"],
-            site["postcode"],
-            site["meter_id"],
-            f"{float(site['supplier_ef']):.4f}",
-            site["unit"],
-            site["start_reading"],
-            site["end_reading"],
-            f"{float(site['total_quantity']):.2f}",
-            f"{float(site['total_cost']):.2f}",
-            currency_code(company.get("currency")),
-            f"{float(site['emissions_kg']):.2f}",
-            f"{float(site['emissions_t']):.3f}",
-        ]
-        tariffs = site.get("tariffs", [])
-        for idx in range(max_tariffs):
-            if idx < len(tariffs):
-                tariff = tariffs[idx]
-                row += [
-                    tariff["name"],
-                    f"{float(tariff['quantity']):.2f}",
-                    f"{float(tariff['unit_cost']):.4f}",
-                    f"{float(tariff['cost']):.2f}",
-                ]
+        row: list[str] = []
+        tariff_inserted = False
+        for field_id in ordered_field_ids:
+            if field_id in distractor_fields:
+                row.append(resolve_tabular_value(distractor_plan, distractor_fields[field_id], _electricity_row_key(company, site)))
             else:
-                row += ["", "", "", ""]
+                _, accessor = _ELECTRICITY_COLUMN_MAP[field_id]
+                row.append(accessor(company, site))
+            if field_id == "total_qty" and plan.get("tariff_block_position") == "after_total_qty":
+                row.extend(_electricity_tariff_row(site, max_tariffs))
+                tariff_inserted = True
+        if not tariff_inserted:
+            row.extend(_electricity_tariff_row(site, max_tariffs))
         writer.writerow(row)
 
     return buf.getvalue().encode("utf-8-sig")
@@ -429,67 +542,43 @@ def _generate_smart_meter_csv(config: dict, sections: list[dict]) -> bytes:
     strings = ELECTRICITY_TRANSLATIONS.get(lang, ELECTRICITY_TRANSLATIONS["en"])
     mode = str(config["document"].get("smart_meter_data_granularity", "monthly")).lower()
     value_mode = str(config["document"].get("smart_meter_interval_value_mode", "consumption_diff")).lower()
+    plan = _layout_plan(config)
+    distractor_plan = _distractor_plan(config)
+    distractor_fields = _distractor_field_map(distractor_plan)
     rows = build_smart_meter_rows(config, sections)
 
     buf = io.StringIO()
     writer = csv.writer(buf)
+    _write_layout_prefix(writer, plan)
 
     if mode == "interval":
-        if value_mode == "cumulative_end_reading":
-            writer.writerow([
-                strings["xl_col_meter_id"],
-                strings["sm_col_timestamp"],
-                strings["sm_col_end_reading"],
-                strings["xl_col_unit"],
-            ])
-            for row in rows:
-                writer.writerow([
-                    row["meter_id"],
-                    row["timestamp"],
-                    f"{float(row['end_reading']):.4f}",
-                    row["unit"],
-                ])
-        else:
-            writer.writerow([
-                strings["xl_col_meter_id"],
-                strings["sm_col_timestamp"],
-                strings["sm_col_import_kwh"],
-                strings["sm_col_export_kwh"],
-                strings["xl_col_unit"],
-            ])
-            for row in rows:
-                writer.writerow([
-                    row["meter_id"],
-                    row["timestamp"],
-                    f"{float(row['import_kwh']):.4f}",
-                    f"{float(row['export_kwh']):.4f}",
-                    row["unit"],
-                ])
-    else:
+        interval_spec = _SMART_METER_INTERVAL_SPECS.get(value_mode, _SMART_METER_INTERVAL_SPECS["consumption_diff"])
+        interval_map = {field_id: (header_key, accessor) for field_id, header_key, accessor in interval_spec}
+        ordered_field_ids = _ordered_tabular_ids(_ordered_ids(plan, list(interval_map)), distractor_plan)
         writer.writerow([
-            strings["xl_col_meter_id"],
-            strings["xl_col_site"],
-            strings["xl_col_period"],
-            strings["xl_col_start_read"],
-            strings["xl_col_end_read"],
-            strings["sm_col_consumption"],
-            strings["xl_col_unit"],
-            strings["sm_col_tariff_type"],
-            strings["xl_tariff_cost"],
-            strings["xl_col_currency"],
+            distractor_fields[field_id].label if field_id in distractor_fields else _header_text(strings, plan, field_id, interval_map[field_id][0])
+            for field_id in ordered_field_ids
         ])
         for row in rows:
             writer.writerow([
-                row["meter_id"],
-                row["site_label"],
-                row["period_label"],
-                row["start_reading"],
-                row["end_reading"],
-                f"{float(row['consumption']):.2f}",
-                row["unit"],
-                row["tariff_type"],
-                "" if row["cost"] in ("", None) else f"{float(row['cost']):.2f}",
-                row["currency"],
+                resolve_tabular_value(distractor_plan, distractor_fields[field_id], _smart_meter_row_key(row))
+                if field_id in distractor_fields
+                else interval_map[field_id][1](row)
+                for field_id in ordered_field_ids
+            ])
+    else:
+        monthly_map = {field_id: (header_key, accessor) for field_id, header_key, accessor in _SMART_METER_MONTHLY_SPEC}
+        ordered_field_ids = _ordered_tabular_ids(_ordered_ids(plan, list(monthly_map)), distractor_plan)
+        writer.writerow([
+            distractor_fields[field_id].label if field_id in distractor_fields else _header_text(strings, plan, field_id, monthly_map[field_id][0])
+            for field_id in ordered_field_ids
+        ])
+        for row in rows:
+            writer.writerow([
+                resolve_tabular_value(distractor_plan, distractor_fields[field_id], _smart_meter_row_key(row))
+                if field_id in distractor_fields
+                else monthly_map[field_id][1](row)
+                for field_id in ordered_field_ids
             ])
 
     return buf.getvalue().encode("utf-8-sig")

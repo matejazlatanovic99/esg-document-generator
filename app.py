@@ -12,6 +12,7 @@ from components.sidebar import (
 from components.scope_forms import render_scope_form
 from utils.category_registry import get_category_workflow
 from utils.generator import (
+    build_document_download_filename,
     generate_document_bytes,
 )
 
@@ -179,12 +180,11 @@ if generate_clicked and is_ready:
         for err in errors:
             st.markdown(f"- {err}")
     else:
-        base_name = workflow.build_filename_base(document_type, form_data)
         zip_export = workflow.should_zip_export(document_type, output_format, form_data)
         with st.spinner("Building document… this may take a moment."):
             try:
                 fmt_cfg = OUTPUT_FORMATS[output_format]
-                filename = base_name + (".zip" if zip_export else fmt_cfg["ext"])
+                filename = build_document_download_filename(raw_config, output_format)
                 mime = "application/zip" if zip_export else fmt_cfg["mime"]
                 file_bytes = generate_document_bytes(raw_config, output_format)
 

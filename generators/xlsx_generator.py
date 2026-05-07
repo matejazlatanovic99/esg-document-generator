@@ -11,6 +11,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from utils.currency import currency_code
+from utils.distractor_fields import resolve_tabular_value
 
 # ── translations ──────────────────────────────────────────────────────────────
 
@@ -381,37 +382,96 @@ def _data_cell(cell, value: Any, fmt: str | None = None, alt: bool = False, bold
         cell.number_format = fmt
 
 
-# ── detail sheet column spec: (header_key, width, number_format) ─────────────
-_DETAIL_COL_SPEC: list[tuple[str, int, str | None]] = [
-    ("col_invoice_no",   20, None),
-    ("col_company",      30, None),
-    ("col_site",         20, None),
-    ("col_city",         14, None),
-    ("col_postcode",     11, None),
-    ("col_meter_id",     22, None),
-    ("col_period",       18, None),
-    ("col_period_start", 14, "DD MMM YYYY"),
-    ("col_period_end",   14, "DD MMM YYYY"),
-    ("col_issue_date",   14, "DD MMM YYYY"),
-    ("col_due_date",     14, "DD MMM YYYY"),
-    ("col_prev_read",    20, "#,##0"),
-    ("col_curr_read",    20, "#,##0"),
-    ("col_consumption",  20, "#,##0"),
-    ("col_unit_price",   20, "0.000"),
-    ("col_heat_cost",    16, "#,##0.00"),
-    ("col_capacity",     14, "#,##0"),
-    ("col_cap_rate",     20, "0.00"),
-    ("col_supplier_ef",  24, "0.0000"),
-    ("col_cap_charge",   20, "#,##0.00"),
-    ("col_subtotal",     16, "#,##0.00"),
-    ("col_vat",          13, "#,##0.00"),
-    ("col_total",        16, "#,##0.00"),
-    ("col_currency",     10, None),
+_HEAT_DETAIL_COLUMN_SPECS: list[tuple[str, str, int, str | None, str | None, Any]] = [
+    ("invoice_no", "col_invoice_no", 20, None, "invoice_no", lambda co, si, rec: rec["invoice_no"]),
+    ("company", "col_company", 30, None, None, lambda co, si, rec: co["label"]),
+    ("site", "col_site", 20, None, "site_label", lambda co, si, rec: si["label"]),
+    ("city", "col_city", 14, None, "city", lambda co, si, rec: rec["city"]),
+    ("postcode", "col_postcode", 11, None, "postcode", lambda co, si, rec: rec["postcode"]),
+    ("meter_id", "col_meter_id", 22, None, "meter_id", lambda co, si, rec: rec["meter_id"]),
+    ("period", "col_period", 18, None, None, lambda co, si, rec: rec["billing_period_label"]),
+    ("period_start", "col_period_start", 14, "DD MMM YYYY", None, lambda co, si, rec: rec["period_start"]),
+    ("period_end", "col_period_end", 14, "DD MMM YYYY", None, lambda co, si, rec: rec["period_end"]),
+    ("issue_date", "col_issue_date", 14, "DD MMM YYYY", None, lambda co, si, rec: rec["issue_date"]),
+    ("due_date", "col_due_date", 14, "DD MMM YYYY", None, lambda co, si, rec: rec["due_date"]),
+    ("prev_read", "col_prev_read", 20, "#,##0", "prev_read", lambda co, si, rec: rec["prev_read"]),
+    ("curr_read", "col_curr_read", 20, "#,##0", "curr_read", lambda co, si, rec: rec["curr_read"]),
+    ("consumption", "col_consumption", 20, "#,##0", "consumption", lambda co, si, rec: rec["consumption"]),
+    ("unit_price", "col_unit_price", 20, "0.000", "unit_price", lambda co, si, rec: rec["unit_price"] if isinstance(rec["unit_price"], str) else float(rec["unit_price"])),
+    ("heat_cost", "col_heat_cost", 16, "#,##0.00", "heat_cost", lambda co, si, rec: rec["heat_cost"] if isinstance(rec["heat_cost"], str) else float(rec["heat_cost"])),
+    ("capacity", "col_capacity", 14, "#,##0", "capacity_kw", lambda co, si, rec: rec["capacity_kw"]),
+    ("cap_rate", "col_cap_rate", 20, "0.00", "capacity_rate", lambda co, si, rec: rec["capacity_rate"] if isinstance(rec["capacity_rate"], str) else float(rec["capacity_rate"])),
+    ("supplier_ef", "col_supplier_ef", 24, "0.0000", "supplier_ef", lambda co, si, rec: rec["supplier_ef"] if isinstance(rec["supplier_ef"], str) else float(rec["supplier_ef"])),
+    ("cap_charge", "col_cap_charge", 20, "#,##0.00", "capacity_charge", lambda co, si, rec: rec["capacity_charge"] if isinstance(rec["capacity_charge"], str) else float(rec["capacity_charge"])),
+    ("subtotal", "col_subtotal", 16, "#,##0.00", None, lambda co, si, rec: rec["subtotal"] if isinstance(rec["subtotal"], str) else float(rec["subtotal"])),
+    ("vat", "col_vat", 13, "#,##0.00", None, lambda co, si, rec: rec["vat"] if isinstance(rec["vat"], str) else float(rec["vat"])),
+    ("total", "col_total", 16, "#,##0.00", None, lambda co, si, rec: rec["total"] if isinstance(rec["total"], str) else float(rec["total"])),
+    ("currency", "col_currency", 10, None, None, lambda co, si, rec: currency_code(co.get("currency"))),
 ]
 
+_HEAT_DETAIL_COLUMN_MAP = {
+    field_id: {
+        "header_key": header_key,
+        "width": width,
+        "fmt": fmt,
+        "blank_field": blank_field,
+        "accessor": accessor,
+    }
+    for field_id, header_key, width, fmt, blank_field, accessor in _HEAT_DETAIL_COLUMN_SPECS
+}
 
-def _detail_cols(strings: dict) -> list[tuple[str, int, str | None]]:
-    return [(strings[key], width, fmt) for key, width, fmt in _DETAIL_COL_SPEC]
+_ELECTRICITY_CORE_COLUMN_SPECS: list[tuple[str, str, int, str | None, Any]] = [
+    ("reference", "xl_col_ref", 30, None, lambda co, si: si["ref_no"]),
+    ("company", "xl_col_company", 28, None, lambda co, si: co["label"]),
+    ("site", "xl_col_site", 22, None, lambda co, si: si["label"]),
+    ("period", "xl_col_period", 18, None, lambda co, si: si["billing_period_label"]),
+    ("city", "xl_col_city", 16, None, lambda co, si: si["city"]),
+    ("postcode", "xl_col_postcode", 10, None, lambda co, si: si["postcode"]),
+    ("meter_id", "xl_col_meter_id", 24, None, lambda co, si: si["meter_id"]),
+    ("supplier_ef", "xl_col_supplier_ef", 16, "#,##0.0000", lambda co, si: si["supplier_ef"] if isinstance(si["supplier_ef"], str) else float(si["supplier_ef"])),
+    ("unit", "xl_col_unit", 8, None, lambda co, si: si["unit"]),
+    ("start_read", "xl_col_start_read", 14, "#,##0", lambda co, si: si["start_reading"]),
+    ("end_read", "xl_col_end_read", 14, "#,##0", lambda co, si: si["end_reading"]),
+    ("total_qty", "xl_col_total_qty", 14, "#,##0.00", lambda co, si: si["total_quantity"] if isinstance(si["total_quantity"], str) else float(si["total_quantity"])),
+    ("total_cost", "xl_col_total_cost", 14, "#,##0.00", lambda co, si: si["total_cost"] if isinstance(si["total_cost"], str) else float(si["total_cost"])),
+    ("currency", "xl_col_currency", 10, None, lambda co, si: currency_code(co.get("currency"))),
+    ("emissions_kg", "xl_col_emissions_kg", 16, "#,##0.00", lambda co, si: si["emissions_kg"] if isinstance(si.get("emissions_kg"), str) else float(si["emissions_kg"])),
+    ("emissions_t", "xl_col_emissions_t", 16, "#,##0.00", lambda co, si: si["emissions_t"] if isinstance(si.get("emissions_t"), str) else float(si["emissions_t"])),
+]
+
+_ELECTRICITY_CORE_COLUMN_MAP = {
+    field_id: {"header_key": header_key, "width": width, "fmt": fmt, "accessor": accessor}
+    for field_id, header_key, width, fmt, accessor in _ELECTRICITY_CORE_COLUMN_SPECS
+}
+
+_SMART_METER_MONTHLY_SPECS: list[tuple[str, str, int, str | None, Any]] = [
+    ("meter_id", "xl_col_meter_id", 22, None, lambda row: row["meter_id"]),
+    ("site", "xl_col_site", 24, None, lambda row: row["site_label"]),
+    ("period", "xl_col_period", 18, None, lambda row: row["period_label"]),
+    ("start_read", "xl_col_start_read", 14, "#,##0", lambda row: row["start_reading"]),
+    ("end_read", "xl_col_end_read", 14, "#,##0", lambda row: row["end_reading"]),
+    ("consumption", "sm_col_consumption", 14, "#,##0.00", lambda row: row["consumption"]),
+    ("unit", "xl_col_unit", 10, None, lambda row: row["unit"]),
+    ("tariff_type", "sm_col_tariff_type", 18, None, lambda row: row["tariff_type"]),
+    ("tariff_cost", "xl_tariff_cost", 12, "#,##0.00", lambda row: row["cost"]),
+    ("currency", "xl_col_currency", 10, None, lambda row: row["currency"]),
+]
+
+_SMART_METER_INTERVAL_SPECS: dict[str, list[tuple[str, str, int, str | None, Any]]] = {
+    "consumption_diff": [
+        ("meter_id", "xl_col_meter_id", 22, None, lambda row: row["meter_id"]),
+        ("timestamp", "sm_col_timestamp", 24, None, lambda row: row["timestamp"]),
+        ("import_kwh", "sm_col_import_kwh", 14, "0.0000", lambda row: row["import_kwh"]),
+        ("export_kwh", "sm_col_export_kwh", 14, "0.0000", lambda row: row["export_kwh"]),
+        ("unit", "xl_col_unit", 10, None, lambda row: row["unit"]),
+    ],
+    "cumulative_end_reading": [
+        ("meter_id", "xl_col_meter_id", 22, None, lambda row: row["meter_id"]),
+        ("timestamp", "sm_col_timestamp", 24, None, lambda row: row["timestamp"]),
+        ("end_read", "sm_col_end_reading", 16, "0.0000", lambda row: row["end_reading"]),
+        ("unit", "xl_col_unit", 10, None, lambda row: row["unit"]),
+    ],
+}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -440,6 +500,153 @@ def _replace_currency_labels(strings: dict[str, str], currency_label: str) -> di
     return {key: value.replace("£", currency_label) for key, value in strings.items()}
 
 
+def _layout_plan(config: dict) -> dict:
+    return config.get("document", {}).get("layout_plan", {})
+
+
+def _distractor_plan(config: dict):
+    return config.get("document", {}).get("distractor_plan")
+
+
+def _ordered_ids(plan: dict, available_ids: list[str]) -> list[str]:
+    excluded = set(plan.get("excluded_fields") or [])
+    available_ids = [field_id for field_id in available_ids if field_id not in excluded]
+    requested = list(plan.get("column_order") or [])
+    if not requested:
+        return available_ids
+    ordered = [field_id for field_id in requested if field_id in available_ids]
+    ordered.extend(field_id for field_id in available_ids if field_id not in ordered)
+    return ordered
+
+
+def _header_text(strings: dict[str, str], plan: dict, field_id: str, header_key: str) -> str:
+    return str((plan.get("header_aliases") or {}).get(field_id, strings[header_key]))
+
+
+def _write_sheet_preamble(ws, plan: dict) -> int:
+    row = 1
+    for preamble_row in plan.get("preamble_rows") or []:
+        for col_idx, value in enumerate(preamble_row, start=1):
+            ws.cell(row=row, column=col_idx, value=value)
+        row += 1
+    row += int(plan.get("header_row_offset", 0))
+    return row
+
+
+def _augment_columns_with_distractors(columns: list[dict[str, Any]], distractor_plan) -> list[dict[str, Any]]:
+    if not distractor_plan or not getattr(distractor_plan, "enabled", False):
+        return columns
+
+    augmented = list(columns)
+    for field in distractor_plan.tabular_fields:
+        insert_at = len(augmented)
+        anchors = [column.get("field_id") for column in augmented]
+        if field.anchor in anchors:
+            anchor_index = anchors.index(field.anchor)
+            insert_at = anchor_index + 1 if field.position == "after" else anchor_index
+        augmented.insert(
+            insert_at,
+            {
+                "kind": "distractor",
+                "field_id": field.field_id,
+                "label": field.label,
+                "width": 16,
+                "fmt": None,
+                "distractor_field": field,
+            },
+        )
+    return augmented
+
+
+def _heat_row_key(company: dict, site: dict, rec: dict) -> str:
+    del company, site
+    return str(rec.get("invoice_no") or rec.get("billing_period_label") or "heat-row")
+
+
+def _electricity_row_key(company: dict, site: dict) -> str:
+    del company
+    return str(site.get("ref_no") or site.get("meter_id") or site.get("billing_period_label") or "electricity-row")
+
+
+def _smart_meter_row_key(row: dict) -> str:
+    return str(row.get("timestamp") or row.get("period_label") or row.get("meter_id") or "smart-meter-row")
+
+
+def _heat_detail_columns(strings: dict, plan: dict, distractor_plan) -> list[dict[str, Any]]:
+    ordered_field_ids = _ordered_ids(plan, list(_HEAT_DETAIL_COLUMN_MAP))
+    columns = [
+        {
+            "kind": "base",
+            "field_id": field_id,
+            "label": _header_text(strings, plan, field_id, _HEAT_DETAIL_COLUMN_MAP[field_id]["header_key"]),
+            **_HEAT_DETAIL_COLUMN_MAP[field_id],
+        }
+        for field_id in ordered_field_ids
+    ]
+    return _augment_columns_with_distractors(columns, distractor_plan)
+
+
+def _electricity_detail_columns(strings: dict, plan: dict, max_tariffs: int, distractor_plan) -> list[dict[str, Any]]:
+    ordered_field_ids = _ordered_ids(plan, list(_ELECTRICITY_CORE_COLUMN_MAP))
+    columns: list[dict[str, Any]] = []
+    tariff_inserted = False
+    for field_id in ordered_field_ids:
+        spec = _ELECTRICITY_CORE_COLUMN_MAP[field_id]
+        columns.append({
+            "kind": "core",
+            "field_id": field_id,
+            "label": _header_text(strings, plan, field_id, spec["header_key"]),
+            **spec,
+        })
+        if field_id == "total_qty" and plan.get("tariff_block_position") == "after_total_qty":
+            columns.extend(_electricity_tariff_columns(strings, max_tariffs))
+            tariff_inserted = True
+    if not tariff_inserted:
+        columns.extend(_electricity_tariff_columns(strings, max_tariffs))
+    return _augment_columns_with_distractors(columns, distractor_plan)
+
+
+def _electricity_tariff_columns(strings: dict, max_tariffs: int) -> list[dict[str, Any]]:
+    columns: list[dict[str, Any]] = []
+    for idx in range(max_tariffs):
+        prefix = f"Tariff {idx + 1}"
+        columns.extend([
+            {"kind": "tariff", "idx": idx, "part": "name", "label": f"{prefix}: {strings['xl_tariff_name']}", "width": 26, "fmt": None},
+            {"kind": "tariff", "idx": idx, "part": "qty", "label": f"{prefix}: {strings['xl_tariff_qty']}", "width": 12, "fmt": "#,##0.00"},
+            {"kind": "tariff", "idx": idx, "part": "rate", "label": f"{prefix}: {strings['xl_tariff_rate']}", "width": 12, "fmt": "#,##0.0000"},
+            {"kind": "tariff", "idx": idx, "part": "cost", "label": f"{prefix}: {strings['xl_tariff_cost']}", "width": 12, "fmt": "#,##0.00"},
+        ])
+    return columns
+
+
+def _smart_meter_columns(strings: dict, plan: dict, mode: str, value_mode: str, distractor_plan) -> list[dict[str, Any]]:
+    base_specs = _SMART_METER_MONTHLY_SPECS if mode != "interval" else _SMART_METER_INTERVAL_SPECS.get(value_mode, _SMART_METER_INTERVAL_SPECS["consumption_diff"])
+    spec_map = {
+        field_id: {"header_key": header_key, "width": width, "fmt": fmt, "accessor": accessor}
+        for field_id, header_key, width, fmt, accessor in base_specs
+    }
+    ordered_field_ids = _ordered_ids(plan, list(spec_map))
+    columns = [
+        {
+            "kind": "base",
+            "field_id": field_id,
+            "label": _header_text(strings, plan, field_id, spec_map[field_id]["header_key"]),
+            **spec_map[field_id],
+        }
+        for field_id in ordered_field_ids
+    ]
+    return _augment_columns_with_distractors(columns, distractor_plan)
+
+
+def _reorder_workbook_sheets(workbook, desired_titles: list[str]) -> None:
+    if not desired_titles:
+        return
+    title_map = {sheet.title: sheet for sheet in workbook.worksheets}
+    ordered = [title_map[title] for title in desired_titles if title in title_map]
+    ordered.extend(sheet for sheet in workbook.worksheets if sheet not in ordered)
+    workbook._sheets = ordered
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def _generate_heat_xlsx(
@@ -457,6 +664,8 @@ def _generate_heat_xlsx(
     """
     lang = config["document"].get("language", "en")
     strings = _replace_currency_labels(TRANSLATIONS.get(lang, TRANSLATIONS["en"]), _currency_label_for_sections(sections))
+    plan = _layout_plan(config)
+    distractor_plan = _distractor_plan(config)
 
     default_accent = sections[0]["company"]["accent"].lstrip("#") if sections else "1E5B88"
     omit = blank_fields or set()
@@ -471,17 +680,30 @@ def _generate_heat_xlsx(
         detail_seed_sheet = wb.active
 
     if split_by_company:
-        by_company = list(_sections_by_company(sections).items())
+        grouped = _sections_by_company(sections)
+        ordered_labels = list(plan.get("company_sheet_order") or grouped.keys())
+        by_company = [(label, grouped[label]) for label in ordered_labels if label in grouped]
         for idx, (label, co_sections) in enumerate(by_company):
             accent = co_sections[0]["company"]["accent"].lstrip("#")
             sheet_name = _safe_sheet_name(label)
             target_sheet = detail_seed_sheet if idx == 0 and detail_seed_sheet is not None else wb.create_sheet(sheet_name)
             target_sheet.title = sheet_name
-            _build_detail_sheet(target_sheet, co_sections, accent, omit, strings)
+            _build_detail_sheet(target_sheet, co_sections, accent, omit, strings, plan, distractor_plan)
     else:
         target_sheet = detail_seed_sheet if detail_seed_sheet is not None else wb.create_sheet("Billing Detail")
         target_sheet.title = "Billing Detail"
-        _build_detail_sheet(target_sheet, sections, default_accent, omit, strings)
+        _build_detail_sheet(target_sheet, sections, default_accent, omit, strings, plan, distractor_plan)
+
+    if include_summary and plan.get("sheet_order"):
+        desired_titles = []
+        for sheet_id in plan["sheet_order"]:
+            if sheet_id == "summary":
+                desired_titles.append("Summary")
+            elif sheet_id == "detail":
+                desired_titles.append("Billing Detail")
+            else:
+                desired_titles.append(_safe_sheet_name(sheet_id))
+        _reorder_workbook_sheets(wb, desired_titles)
 
     buf = BytesIO()
     wb.save(buf)
@@ -492,6 +714,8 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
     lang = config["document"].get("language", "en")
     strings = ELECTRICITY_TRANSLATIONS.get(lang, ELECTRICITY_TRANSLATIONS["en"])
     financial_period = config["financial_period"]
+    plan = _layout_plan(config)
+    distractor_plan = _distractor_plan(config)
 
     accent_hex = sections[0]["company"]["accent"] if sections else "#1E5B88"
     accent_r, accent_g, accent_b = (int(accent_hex[i:i + 2], 16) for i in (1, 3, 5))
@@ -556,9 +780,18 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
         data_row = header_row + 1
         for company_label, company_sections in by_company.items():
             site_count = len({section["site"]["_site_uid"] for section in company_sections})
-            total_qty = sum(section["site"]["total_quantity"] for section in company_sections)
-            total_cost = sum(section["site"]["total_cost"] for section in company_sections)
-            total_emissions = sum(section["site"]["emissions_t"] for section in company_sections)
+            total_qty = sum(
+                v for s in company_sections
+                if not isinstance((v := s["site"]["total_quantity"]), str)
+            )
+            total_cost = sum(
+                v for s in company_sections
+                if not isinstance((v := s["site"]["total_cost"]), str)
+            )
+            total_emissions = sum(
+                v for s in company_sections
+                if not isinstance((v := s["site"]["emissions_t"]), str)
+            )
 
             row_values = [
                 company_label,
@@ -609,92 +842,48 @@ def _generate_electricity_xlsx(config: dict, sections: list[dict], include_summa
         detail.title = "Detail"
     max_tariffs = max((len(section["site"].get("tariffs", [])) for section in sections), default=0)
 
-    detail_headers = [
-        strings["xl_col_ref"],
-        strings["xl_col_company"],
-        strings["xl_col_site"],
-        strings["xl_col_period"],
-        strings["xl_col_city"],
-        strings["xl_col_postcode"],
-        strings["xl_col_meter_id"],
-        strings["xl_col_supplier_ef"],
-        strings["xl_col_unit"],
-        strings["xl_col_start_read"],
-        strings["xl_col_end_read"],
-        strings["xl_col_total_qty"],
-        strings["xl_col_total_cost"],
-        strings["xl_col_currency"],
-        strings["xl_col_emissions_kg"],
-        strings["xl_col_emissions_t"],
-    ]
-    for idx in range(max_tariffs):
-        prefix = f"Tariff {idx + 1}"
-        detail_headers += [
-            f"{prefix}: {strings['xl_tariff_name']}",
-            f"{prefix}: {strings['xl_tariff_qty']}",
-            f"{prefix}: {strings['xl_tariff_rate']}",
-            f"{prefix}: {strings['xl_tariff_cost']}",
-        ]
-
-    for col_idx, header in enumerate(detail_headers, start=1):
-        cell = detail.cell(1, col_idx, header)
+    detail_columns = _electricity_detail_columns(strings, plan, max_tariffs, distractor_plan)
+    header_row = _write_sheet_preamble(detail, plan)
+    for col_idx, column in enumerate(detail_columns, start=1):
+        cell = detail.cell(header_row, col_idx, column["label"])
         cell.fill = hdr_fill
         cell.font = hdr_font
         cell.border = border
         cell.alignment = Alignment(horizontal="center")
+        detail.column_dimensions[get_column_letter(col_idx)].width = column["width"]
+    detail.freeze_panes = f"A{header_row + 1}"
 
-    for row_idx, section in enumerate(sections, start=2):
+    for row_idx, section in enumerate(sections, start=header_row + 1):
         company = section["company"]
         site = section["site"]
-        row_values = [
-            site["ref_no"],
-            company["label"],
-            site["label"],
-            site["billing_period_label"],
-            site["city"],
-            site["postcode"],
-            site["meter_id"],
-            float(site["supplier_ef"]),
-            site["unit"],
-            site["start_reading"],
-            site["end_reading"],
-            float(site["total_quantity"]),
-            float(site["total_cost"]),
-            currency_code(company.get("currency")),
-            float(site["emissions_kg"]),
-            float(site["emissions_t"]),
-        ]
         tariffs = site.get("tariffs", [])
-        for idx in range(max_tariffs):
-            if idx < len(tariffs):
-                tariff = tariffs[idx]
-                row_values += [
-                    tariff["name"],
-                    float(tariff["quantity"]),
-                    float(tariff["unit_cost"]),
-                    float(tariff["cost"]),
-                ]
+
+        for col_idx, column in enumerate(detail_columns, start=1):
+            if column["kind"] == "core":
+                value = column["accessor"](company, site)
+            elif column["kind"] == "distractor":
+                value = resolve_tabular_value(distractor_plan, column["distractor_field"], _electricity_row_key(company, site))
             else:
-                row_values += ["", "", "", ""]
-
-        numeric_cols = {8, 12, 13, 15, 16}
-        rate_cols = set()
-        for idx in range(max_tariffs):
-            base = 17 + idx * 4
-            numeric_cols |= {base + 1, base + 2, base + 3}
-            rate_cols.add(base + 2)
-
-        for col_idx, value in enumerate(row_values, start=1):
+                tariff = tariffs[column["idx"]] if column["idx"] < len(tariffs) else None
+                if tariff is None:
+                    value = ""
+                elif column["part"] == "name":
+                    value = tariff["name"]
+                elif column["part"] == "qty":
+                    value = tariff["quantity"] if isinstance(tariff["quantity"], str) else float(tariff["quantity"])
+                elif column["part"] == "rate":
+                    value = tariff["unit_cost"] if isinstance(tariff["unit_cost"], str) else float(tariff["unit_cost"])
+                else:
+                    value = tariff["cost"] if isinstance(tariff["cost"], str) else float(tariff["cost"])
             cell = detail.cell(row_idx, col_idx, value)
             cell.border = border
             cell.font = Font(name="Calibri", size=9)
-            if col_idx in numeric_cols and isinstance(value, float):
-                cell.number_format = "#,##0.0000" if col_idx in rate_cols else "#,##0.00"
+            if column.get("fmt") and isinstance(value, (int, float, Decimal)):
+                cell.number_format = column["fmt"]
 
-    base_widths = [30, 28, 22, 18, 16, 10, 24, 16, 8, 14, 14, 14, 14, 10, 16, 16]
-    detail_widths = base_widths + [26, 12, 12, 12] * max_tariffs
-    for col_idx, width in enumerate(detail_widths, start=1):
-        detail.column_dimensions[get_column_letter(col_idx)].width = width
+    if include_summary and plan.get("sheet_order"):
+        desired_titles = ["Summary" if sheet_id == "summary" else "Detail" for sheet_id in plan["sheet_order"]]
+        _reorder_workbook_sheets(workbook, desired_titles)
 
     buf = BytesIO()
     workbook.save(buf)
@@ -708,6 +897,8 @@ def _generate_smart_meter_xlsx(config: dict, sections: list[dict]) -> bytes:
     strings = ELECTRICITY_TRANSLATIONS.get(lang, ELECTRICITY_TRANSLATIONS["en"])
     mode = str(config["document"].get("smart_meter_data_granularity", "monthly")).lower()
     value_mode = str(config["document"].get("smart_meter_interval_value_mode", "consumption_diff")).lower()
+    plan = _layout_plan(config)
+    distractor_plan = _distractor_plan(config)
     rows = build_smart_meter_rows(config, sections)
 
     accent = config["companies"][0].get("accent", "#1E5B88") if config.get("companies") else "#1E5B88"
@@ -718,79 +909,22 @@ def _generate_smart_meter_xlsx(config: dict, sections: list[dict]) -> bytes:
     workbook = openpyxl.Workbook()
     ws = workbook.active
     ws.title = "Smart Meter Data"
-    ws.freeze_panes = "A2"
+    columns = _smart_meter_columns(strings, plan, mode, value_mode, distractor_plan)
+    header_row = _write_sheet_preamble(ws, plan)
+    ws.freeze_panes = f"A{header_row + 1}"
 
-    if mode == "interval":
-        if value_mode == "cumulative_end_reading":
-            headers = [
-                strings["xl_col_meter_id"],
-                strings["sm_col_timestamp"],
-                strings["sm_col_end_reading"],
-                strings["xl_col_unit"],
-            ]
-            widths = [22, 24, 16, 10]
-        else:
-            headers = [
-                strings["xl_col_meter_id"],
-                strings["sm_col_timestamp"],
-                strings["sm_col_import_kwh"],
-                strings["sm_col_export_kwh"],
-                strings["xl_col_unit"],
-            ]
-            widths = [22, 24, 14, 14, 10]
-    else:
-        headers = [
-            strings["xl_col_meter_id"],
-            strings["xl_col_site"],
-            strings["xl_col_period"],
-            strings["xl_col_start_read"],
-            strings["xl_col_end_read"],
-            strings["sm_col_consumption"],
-            strings["xl_col_unit"],
-            strings["sm_col_tariff_type"],
-            strings["xl_tariff_cost"],
-            strings["xl_col_currency"],
-        ]
-        widths = [22, 24, 18, 14, 14, 14, 10, 18, 12, 10]
+    for col_idx, column in enumerate(columns, start=1):
+        _header_cell(ws.cell(row=header_row, column=col_idx), column["label"], accent_fill)
+        ws.column_dimensions[get_column_letter(col_idx)].width = column["width"]
 
-    for col_idx, header in enumerate(headers, start=1):
-        _header_cell(ws.cell(row=1, column=col_idx), header, accent_fill)
-        ws.column_dimensions[get_column_letter(col_idx)].width = widths[col_idx - 1]
-
-    for row_idx, row in enumerate(rows, start=2):
+    for row_idx, row in enumerate(rows, start=header_row + 1):
         alt = row_idx % 2 == 0
-        if mode == "interval":
-            if value_mode == "cumulative_end_reading":
-                row_values = [
-                    (row["meter_id"], None),
-                    (row["timestamp"], None),
-                    (row["end_reading"], "0.0000"),
-                    (row["unit"], None),
-                ]
+        for col_idx, column in enumerate(columns, start=1):
+            if column["kind"] == "distractor":
+                value = resolve_tabular_value(distractor_plan, column["distractor_field"], _smart_meter_row_key(row))
             else:
-                row_values = [
-                    (row["meter_id"], None),
-                    (row["timestamp"], None),
-                    (row["import_kwh"], "0.0000"),
-                    (row["export_kwh"], "0.0000"),
-                    (row["unit"], None),
-                ]
-        else:
-            row_values = [
-                (row["meter_id"], None),
-                (row["site_label"], None),
-                (row["period_label"], None),
-                (row["start_reading"], "#,##0"),
-                (row["end_reading"], "#,##0"),
-                (row["consumption"], "#,##0.00"),
-                (row["unit"], None),
-                (row["tariff_type"], None),
-                (row["cost"], "#,##0.00"),
-                (row["currency"], None),
-            ]
-
-        for col_idx, (value, fmt) in enumerate(row_values, start=1):
-            _data_cell(ws.cell(row=row_idx, column=col_idx), value, fmt=fmt, alt=alt)
+                value = column["accessor"](row)
+            _data_cell(ws.cell(row=row_idx, column=col_idx), value, fmt=column["fmt"], alt=alt)
 
     buf = BytesIO()
     workbook.save(buf)
@@ -873,11 +1007,9 @@ def _build_summary_sheet(ws, config: dict, sections: list[dict], accent: str, st
         t["sites"].add(section["site"]["label"])
         for rec in section["records"]:
             t["invoices"] += 1
-            t["heat_cost"] += rec["heat_cost"]
-            t["capacity_charge"] += rec["capacity_charge"]
-            t["subtotal"] += rec["subtotal"]
-            t["vat"] += rec["vat"]
-            t["total"] += rec["total"]
+            for _k in ("heat_cost", "capacity_charge", "subtotal", "vat", "total"):
+                if not isinstance(rec[_k], str):
+                    t[_k] += rec[_k]
 
     money_fmt = "#,##0.00"
     for i, (company, t) in enumerate(totals.items()):
@@ -928,51 +1060,31 @@ def _build_summary_sheet(ws, config: dict, sections: list[dict], accent: str, st
 
 # ── detail sheet ──────────────────────────────────────────────────────────────
 
-def _build_detail_sheet(ws, sections: list[dict], accent: str, blank_fields: set[str], strings: dict) -> None:
+def _build_detail_sheet(ws, sections: list[dict], accent: str, blank_fields: set[str], strings: dict, plan: dict, distractor_plan) -> None:
     # Headers
-    for col, (label, width, _) in enumerate(_detail_cols(strings), start=1):
-        _header_cell(ws.cell(row=1, column=col), label, accent)
-        ws.column_dimensions[get_column_letter(col)].width = width
-    ws.row_dimensions[1].height = 22
-    ws.freeze_panes = "A2"
+    columns = _heat_detail_columns(strings, plan, distractor_plan)
+    header_row = _write_sheet_preamble(ws, plan)
+    for col, column in enumerate(columns, start=1):
+        _header_cell(ws.cell(row=header_row, column=col), column["label"], accent)
+        ws.column_dimensions[get_column_letter(col)].width = column["width"]
+    ws.row_dimensions[header_row].height = 22
+    ws.freeze_panes = f"A{header_row + 1}"
 
     # Each entry: (value, record_field_name_or_None, fmt)
     # record_field_name is checked against blank_fields to omit the cell value.
-    row = 2
+    row = header_row + 1
     for section in sections:
         company = section["company"]
         site = section["site"]
         for rec in section["records"]:
             alt = row % 2 == 0
-            row_data: list[tuple[Any, str | None, str | None]] = [
-                (rec["invoice_no"],          "invoice_no",    None),
-                (company["label"],           "company_label", None),
-                (site["label"],              "site_label",    None),
-                (rec["city"],                "city",          None),
-                (rec["postcode"],            "postcode",      None),
-                (rec["meter_id"],            "meter_id",      None),
-                (rec["billing_period_label"],"period_label",  None),
-                (rec["period_start"],        None,            "DD MMM YYYY"),
-                (rec["period_end"],          None,            "DD MMM YYYY"),
-                (rec["issue_date"],          None,            "DD MMM YYYY"),
-                (rec["due_date"],            None,            "DD MMM YYYY"),
-                (rec["prev_read"],           "prev_read",     "#,##0"),
-                (rec["curr_read"],           "curr_read",     "#,##0"),
-                (rec["consumption"],         "consumption",   "#,##0"),
-                (float(rec["unit_price"]),   "unit_price",    "0.000"),
-                (float(rec["heat_cost"]),    "heat_cost",     "#,##0.00"),
-                (rec["capacity_kw"],         "capacity_kw",   "#,##0"),
-                (float(rec["capacity_rate"]),"capacity_rate", "0.00"),
-                (float(rec["supplier_ef"]),  "supplier_ef",   "0.0000"),
-                (float(rec["capacity_charge"]), "capacity_charge", "#,##0.00"),
-                (float(rec["subtotal"]),     "subtotal",      "#,##0.00"),
-                (float(rec["vat"]),          "vat",           "#,##0.00"),
-                (float(rec["total"]),        "total",         "#,##0.00"),
-                (currency_code(company.get("currency")), "currency", None),
-            ]
-            for col, (value, field_name, fmt) in enumerate(row_data, start=1):
-                cell_value = None if (field_name and field_name in blank_fields) else value
-                _data_cell(ws.cell(row=row, column=col), cell_value, fmt=fmt, alt=alt)
+            for col, column in enumerate(columns, start=1):
+                if column["kind"] == "distractor":
+                    cell_value = resolve_tabular_value(distractor_plan, column["distractor_field"], _heat_row_key(company, site, rec))
+                else:
+                    value = column["accessor"](company, site, rec)
+                    cell_value = None if (column["blank_field"] and column["blank_field"] in blank_fields) else value
+                _data_cell(ws.cell(row=row, column=col), cell_value, fmt=column["fmt"], alt=alt)
             ws.row_dimensions[row].height = 18
             row += 1
 

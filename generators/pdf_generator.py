@@ -50,14 +50,24 @@ def q2(value):
 
 
 def fmt_money(value, currency: str | None = "GBP (£)"):
-    return format_money(q2(value), currency)
+    if isinstance(value, str):
+        return value
+    try:
+        return format_money(q2(value), currency)
+    except Exception:
+        return str(value)
 
 
 def fmt_rate(value, places=3):
-    if not isinstance(value, Decimal):
-        value = Decimal(str(value))
-    fmt = "1." + ("0" * places)
-    return f"{value.quantize(Decimal(fmt), rounding=ROUND_HALF_UP):f}"
+    if isinstance(value, str):
+        return value
+    try:
+        if not isinstance(value, Decimal):
+            value = Decimal(str(value))
+        fmt = "1." + ("0" * places)
+        return f"{value.quantize(Decimal(fmt), rounding=ROUND_HALF_UP):f}"
+    except Exception:
+        return str(value)
 
 
 def parse_decimal(value):
@@ -720,6 +730,29 @@ def draw_info_box(c, x, y, w, h, title, lines, accent, accent_soft):
     c.restoreState()
 
 
+def _document_distractor_lines(config: dict) -> list[str]:
+    plan = config.get("document", {}).get("distractor_plan")
+    if not plan or not getattr(plan, "enabled", False):
+        return []
+    return [f"{field.label}: {field.value}" for field in plan.document_fields]
+
+
+def _info_box_height(lines: list[str], *, min_height: int = 84) -> int:
+    return max(min_height, 34 + len(lines) * 10)
+
+
+def _has_visible_value(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
+def _join_display_parts(*parts: str) -> str:
+    return " • ".join(str(part).strip() for part in parts if str(part).strip())
+
+
 def draw_table(c, x, y, w, rows, accent, accent_soft, strings, row_h=18):
     """rows: list of (label, value) or (label, value, use_monospace) tuples."""
     c.saveState()
@@ -756,6 +789,46 @@ def draw_table(c, x, y, w, rows, accent, accent_soft, strings, row_h=18):
     c.restoreState()
 
 
+def _draw_transposed_pairs_pdf(c, x, y, w, rows, accent, accent_soft, row_h=17, chunk_size=5, right_align=False):
+    chunks = [rows[idx:idx + chunk_size] for idx in range(0, len(rows), chunk_size)]
+    total_h = sum(row_h * 2 for _ in chunks) + max(0, len(chunks) - 1) * 6
+    cursor_top = y + total_h
+
+    c.saveState()
+    for chunk_idx, chunk in enumerate(chunks):
+        box_h = row_h * 2
+        cursor_top -= box_h
+        round_box(c, x, cursor_top, w, box_h)
+        col_w = w / len(chunk)
+        c.setStrokeColor(HexColor("#D5DADF"))
+        c.line(x, cursor_top + row_h, x + w, cursor_top + row_h)
+
+        for col_idx in range(1, len(chunk)):
+            vx = x + col_w * col_idx
+            c.line(vx, cursor_top, vx, cursor_top + box_h)
+
+        for col_idx, row in enumerate(chunk):
+            cell_x = x + col_w * col_idx
+            c.setFillColor(HexColor(accent_soft))
+            c.rect(cell_x, cursor_top + row_h, col_w, row_h, stroke=0, fill=1)
+            c.setFillColor(HexColor(accent))
+            c.setFont(FONT_BOLD, 7.0)
+            c.drawString(cell_x + 5, cursor_top + row_h + 5, str(row[0])[:24])
+
+            value = str(row[1])
+            c.setFillColor(HexColor("#1F2328"))
+            c.setFont(FONT_MONO if len(row) > 2 and row[2] else FONT_REG, 7.6)
+            if right_align:
+                c.drawRightString(cell_x + col_w - 5, cursor_top + 5, value[:24])
+            else:
+                c.drawString(cell_x + 5, cursor_top + 5, value[:24])
+
+        if chunk_idx < len(chunks) - 1:
+            cursor_top -= 6
+    c.restoreState()
+    return total_h
+
+
 def draw_amounts_box(c, x, y, w, h, rec, accent, accent_soft, strings, currency):
     c.saveState()
     draw_info_box(c, x, y, w, h, strings["box_charges"], [], accent, accent_soft)
@@ -785,11 +858,12 @@ def draw_amounts_box(c, x, y, w, h, rec, accent, accent_soft, strings, currency)
     c.restoreState()
 
 
-def draw_billing_invoice(c, company, site, rec, page_no, total_pages, bg_path, fg_overlay_path, financial_period_label, strings, noise_level=1.0):
+def draw_billing_invoice(c, company, site, rec, page_no, total_pages, bg_path, fg_overlay_path, financial_period_label, strings, distractor_lines=None, noise_level=1.0):
     strings = replace_pound_labels(strings, company.get("currency", "GBP (£)"))
     accent = company["accent"]
     accent_soft = company["accent_soft"]
     margin = 32
+    distractor_lines = distractor_lines or []
 
     c.drawImage(ImageReader(bg_path), 0, 0, width=PAGE_W, height=PAGE_H, mask="auto")
     c.saveState()
@@ -814,11 +888,13 @@ def draw_billing_invoice(c, company, site, rec, page_no, total_pages, bg_path, f
 
     meta_lines = [
         f"{strings['meta_invoice_no']}: {rec['invoice_no']}",
-        f"{strings['meta_issue_date']}: {rec['issue_date'].strftime('%d %b %Y')}",
-        f"{strings['meta_due_date']}: {rec['due_date'].strftime('%d %b %Y')}",
+        f"{strings['meta_issue_date']}: {rec['issue_date'].strftime('%d %b %Y') if hasattr(rec['issue_date'], 'strftime') else rec['issue_date']}",
+        f"{strings['meta_due_date']}: {rec['due_date'].strftime('%d %b %Y') if hasattr(rec['due_date'], 'strftime') else rec['due_date']}",
         f"{strings['meta_currency']}: {company['currency']}",
+        *distractor_lines,
     ]
-    draw_info_box(c, margin, top_y - 108, PAGE_W - margin * 2, 84, strings["box_invoice"], meta_lines, accent, accent_soft)
+    meta_height = _info_box_height(meta_lines)
+    draw_info_box(c, margin, top_y - 24 - meta_height, PAGE_W - margin * 2, meta_height, strings["box_invoice"], meta_lines, accent, accent_soft)
 
     fields = [
         (strings["row_supplier"],      rec["supplier"]),
@@ -826,21 +902,111 @@ def draw_billing_invoice(c, company, site, rec, page_no, total_pages, bg_path, f
         (strings["row_site"],          rec["site_label"]),
         (strings["row_city"],          rec["city"]),
         (strings["row_postcode"],      rec["postcode"]),
-        (strings["row_period_start"],  rec["period_start"].strftime("%d %b %Y")),
-        (strings["row_period_end"],    rec["period_end"].strftime("%d %b %Y")),
+        (strings["row_period_start"],  rec["period_start"].strftime("%d %b %Y") if hasattr(rec["period_start"], "strftime") else str(rec["period_start"])),
+        (strings["row_period_end"],    rec["period_end"].strftime("%d %b %Y") if hasattr(rec["period_end"], "strftime") else str(rec["period_end"])),
         (strings["row_meter_id"],      rec["meter_id"], True),  # monospace
-        (strings["row_prev_read"],     f"{rec['prev_read']:,}"),
-        (strings["row_curr_read"],     f"{rec['curr_read']:,}"),
-        (strings["row_consumption"],   f"{rec['consumption']:,}"),
+        (strings["row_prev_read"],     f"{rec['prev_read']:,}" if isinstance(rec["prev_read"], int) else str(rec["prev_read"])),
+        (strings["row_curr_read"],     f"{rec['curr_read']:,}" if isinstance(rec["curr_read"], int) else str(rec["curr_read"])),
+        (strings["row_consumption"],   f"{rec['consumption']:,}" if isinstance(rec["consumption"], int) else str(rec["consumption"])),
         (strings["row_unit_price"],    fmt_rate(rec["unit_price"], 3)),
         (strings["row_capacity"],      f"{rec['capacity_kw']}"),
         (strings["row_capacity_rate"], fmt_rate(rec["capacity_rate"], 2)),
         (strings["row_supplier_ef"],   fmt_rate(rec["supplier_ef"], 4)),
     ]
+    fields = [row for row in fields if row[0] != strings["row_site"] or _has_visible_value(row[1])]
     table_y = 171
     draw_table(c, margin, table_y, PAGE_W - margin * 2, fields, accent, accent_soft, strings, row_h=17)
 
     draw_amounts_box(c, margin, 62, PAGE_W - margin * 2, 95, rec, accent, accent_soft, strings, company.get("currency", "GBP (£)"))
+
+    c.setStrokeColor(HexColor("#C9CDD2"))
+    c.line(margin, 42, PAGE_W - margin, 42)
+    c.setFillColor(HexColor("#5A6066"))
+    c.setFont(FONT_REG, 6.4)
+    c.drawString(margin, 25, strings["footer_vat"])
+    c.drawRightString(PAGE_W - margin, 25, strings["footer_page"].format(page=page_no, total=total_pages))
+
+    c.restoreState()
+    if noise_level > 0:
+        c.drawImage(ImageReader(fg_overlay_path), 0, 0, width=PAGE_W, height=PAGE_H, mask="auto")
+    c.showPage()
+
+
+def draw_billing_invoice_variant(c, company, site, rec, page_no, total_pages, bg_path, fg_overlay_path, financial_period_label, strings, layout_plan, distractor_lines=None, noise_level=1.0):
+    strings = replace_pound_labels(strings, company.get("currency", "GBP (£)"))
+    accent = company["accent"]
+    accent_soft = company["accent_soft"]
+    margin = 32
+    content_w = PAGE_W - margin * 2
+    distractor_lines = distractor_lines or []
+
+    c.drawImage(ImageReader(bg_path), 0, 0, width=PAGE_W, height=PAGE_H, mask="auto")
+    c.saveState()
+    c.translate(PAGE_W / 2, PAGE_H / 2)
+    effective_skew = company["skew"] * noise_level
+    jitter = random.choice([-0.04, 0.03, 0.05]) * noise_level
+    c.rotate(effective_skew + jitter)
+    c.translate(-PAGE_W / 2, -PAGE_H / 2)
+
+    draw_logo(c, margin, PAGE_H - 72, accent, company["supplier"], strings)
+    c.setFillColor(HexColor("#1E2328"))
+    c.setFont(FONT_BOLD, 15)
+    c.drawRightString(PAGE_W - margin, PAGE_H - 50, strings["doc_title_heading"])
+    c.setFont(FONT_REG, 8.2)
+    c.drawRightString(PAGE_W - margin, PAGE_H - 64, strings["doc_subtitle"])
+    c.setFont(FONT_REG, 7.2)
+    c.drawRightString(PAGE_W - margin, PAGE_H - 77, f"{financial_period_label} • {company['label']} • {rec['billing_period_label']}")
+
+    meta_lines = [
+        f"{strings['meta_invoice_no']}: {rec['invoice_no']}",
+        f"{strings['meta_issue_date']}: {rec['issue_date'].strftime('%d %b %Y') if hasattr(rec['issue_date'], 'strftime') else rec['issue_date']}",
+        f"{strings['meta_due_date']}: {rec['due_date'].strftime('%d %b %Y') if hasattr(rec['due_date'], 'strftime') else rec['due_date']}",
+        f"{strings['meta_currency']}: {company['currency']}",
+        *distractor_lines,
+    ]
+    fields = [
+        (strings["row_supplier"], rec["supplier"]),
+        (strings["row_customer"], rec["customer"]),
+        (strings["row_site"], rec["site_label"]),
+        (strings["row_city"], rec["city"]),
+        (strings["row_postcode"], rec["postcode"]),
+        (strings["row_period_start"], rec["period_start"].strftime("%d %b %Y") if hasattr(rec["period_start"], "strftime") else str(rec["period_start"])),
+        (strings["row_period_end"], rec["period_end"].strftime("%d %b %Y") if hasattr(rec["period_end"], "strftime") else str(rec["period_end"])),
+        (strings["row_meter_id"], rec["meter_id"], True),
+        (strings["row_prev_read"], f"{rec['prev_read']:,}" if isinstance(rec["prev_read"], int) else str(rec["prev_read"])),
+        (strings["row_curr_read"], f"{rec['curr_read']:,}" if isinstance(rec["curr_read"], int) else str(rec["curr_read"])),
+        (strings["row_consumption"], f"{rec['consumption']:,}" if isinstance(rec["consumption"], int) else str(rec["consumption"])),
+        (strings["row_unit_price"], fmt_rate(rec["unit_price"], 3)),
+        (strings["row_capacity"], f"{rec['capacity_kw']}"),
+        (strings["row_capacity_rate"], fmt_rate(rec["capacity_rate"], 2)),
+        (strings["row_supplier_ef"], fmt_rate(rec["supplier_ef"], 4)),
+    ]
+
+    current_top = PAGE_H - 170
+    section_order = layout_plan.get("section_order") or ["addresses", "meta", "billing_fields", "charges", "footer"]
+    for section_name in section_order:
+        if section_name == "addresses":
+            box_w = (content_w - 12) / 2
+            bottom_y = current_top - 92
+            draw_info_box(c, margin, bottom_y, box_w, 92, strings["box_supplier"], company["supplier_address"], accent, accent_soft)
+            draw_info_box(c, margin + box_w + 12, bottom_y, box_w, 92, strings["box_customer"], site["customer_address"], accent, accent_soft)
+            current_top = bottom_y - 12
+        elif section_name == "meta":
+            meta_height = _info_box_height(meta_lines)
+            bottom_y = current_top - meta_height
+            draw_info_box(c, margin, bottom_y, content_w, meta_height, strings["box_invoice"], meta_lines, accent, accent_soft)
+            current_top = bottom_y - 12
+        elif section_name == "billing_fields":
+            if layout_plan.get("table_transforms", {}).get("billing_fields") == "transposed":
+                total_h = _draw_transposed_pairs_pdf(c, margin, current_top - (sum(17 * 2 for _ in range((len(fields) + 4) // 5)) + max(0, ((len(fields) + 4) // 5) - 1) * 6), content_w, fields, accent, accent_soft, row_h=17, chunk_size=5)
+            else:
+                total_h = 17 * (len(fields) + 1)
+                draw_table(c, margin, current_top - total_h, content_w, fields, accent, accent_soft, strings, row_h=17)
+            current_top -= total_h + 12
+        elif section_name == "charges":
+            bottom_y = current_top - 95
+            draw_amounts_box(c, margin, bottom_y, content_w, 95, rec, accent, accent_soft, strings, company.get("currency", "GBP (£)"))
+            current_top = bottom_y - 12
 
     c.setStrokeColor(HexColor("#C9CDD2"))
     c.line(margin, 42, PAGE_W - margin, 42)
@@ -913,6 +1079,8 @@ def output_path_for_company(config, company):
 def _render_heat_pdf(config, sections, output_path, noise_level=1.0):
     lang = config["document"].get("language", "en")
     strings = TRANSLATIONS.get(lang, TRANSLATIONS["en"])
+    layout_plan = config["document"].get("layout_plan", {})
+    distractor_lines = _document_distractor_lines(config)
 
     total_pages = sum(len(section["records"]) for section in sections)
 
@@ -938,19 +1106,37 @@ def _render_heat_pdf(config, sections, output_path, noise_level=1.0):
     bg_idx = 0
     for section in sections:
         for record in section["records"]:
-            draw_billing_invoice(
-                c,
-                section["company"],
-                section["site"],
-                record,
-                page_no,
-                total_pages,
-                backgrounds[bg_idx],
-                fg_overlays[bg_idx],
-                config["financial_period"]["label"],
-                strings,
-                noise_level=noise_level,
-            )
+            if layout_plan.get("enabled"):
+                draw_billing_invoice_variant(
+                    c,
+                    section["company"],
+                    section["site"],
+                    record,
+                    page_no,
+                    total_pages,
+                    backgrounds[bg_idx],
+                    fg_overlays[bg_idx],
+                    config["financial_period"]["label"],
+                    strings,
+                    layout_plan,
+                    distractor_lines,
+                    noise_level=noise_level,
+                )
+            else:
+                draw_billing_invoice(
+                    c,
+                    section["company"],
+                    section["site"],
+                    record,
+                    page_no,
+                    total_pages,
+                    backgrounds[bg_idx],
+                    fg_overlays[bg_idx],
+                    config["financial_period"]["label"],
+                    strings,
+                    distractor_lines,
+                    noise_level=noise_level,
+                )
             page_no += 1
             bg_idx += 1
 
@@ -1053,11 +1239,11 @@ def _draw_electricity_tariff_table(
 
     data_y = header_y - 12.5
     for tariff in tariffs:
-        values = [tariff["name"], f"{float(tariff['quantity']):,.2f}", tariff["unit"]]
+        values = [tariff["name"], f"{float(tariff['quantity']):,.2f}" if not isinstance(tariff["quantity"], str) else tariff["quantity"], tariff["unit"]]
         if show_costs:
             values.extend([
-                f"{symbol}{float(tariff['unit_cost']):.4f}",
-                f"{symbol}{float(tariff['cost']):,.2f}",
+                f"{symbol}{float(tariff['unit_cost']):.4f}" if not isinstance(tariff["unit_cost"], str) else f"{symbol}{tariff['unit_cost']}",
+                f"{symbol}{float(tariff['cost']):,.2f}" if not isinstance(tariff["cost"], str) else f"{symbol}{tariff['cost']}",
             ])
         cursor_x = x
         for value, col_w in zip(values, col_widths):
@@ -1074,7 +1260,7 @@ def _draw_electricity_tariff_table(
 def _draw_electricity_cost_box(c, x, y, w, h, site, accent, accent_soft, strings):
     draw_info_box(c, x, y, w, h, strings["box_total"], [], accent, accent_soft)
     symbol = site.get("currency_symbol", "")
-    total_str = f"{symbol}{float(site['total_cost']):,.2f}"
+    total_str = f"{symbol}{float(site['total_cost']):,.2f}" if not isinstance(site["total_cost"], str) else f"{symbol}{site['total_cost']}"
     c.saveState()
     sy = y + h - 30
     c.setFillColor(HexColor(accent_soft))
@@ -1086,11 +1272,12 @@ def _draw_electricity_cost_box(c, x, y, w, h, site, accent, accent_soft, strings
     c.restoreState()
 
 
-def _draw_electricity_page(c, company, site, page_no, total_pages, bg_path, fg_path, strings, noise_level=1.0):
+def _draw_electricity_page(c, company, site, page_no, total_pages, bg_path, fg_path, strings, distractor_lines=None, noise_level=1.0):
     accent = company["accent"]
     accent_soft = company["accent_soft"]
     margin = 32
     content_w = PAGE_W - margin * 2
+    distractor_lines = distractor_lines or []
 
     c.drawImage(ImageReader(bg_path), 0, 0, width=PAGE_W, height=PAGE_H, mask="auto")
     c.saveState()
@@ -1105,7 +1292,7 @@ def _draw_electricity_page(c, company, site, page_no, total_pages, bg_path, fg_p
     c.setFont(FONT_REG, 8.2)
     c.drawRightString(PAGE_W - margin, PAGE_H - 64, strings["doc_subtitle"])
     c.setFont(FONT_REG, 7.2)
-    c.drawRightString(PAGE_W - margin, PAGE_H - 77, f"{site['billing_period_label']} • {company['label']} • {site['label']}")
+    c.drawRightString(PAGE_W - margin, PAGE_H - 77, _join_display_parts(site["billing_period_label"], company["label"], site["label"]))
 
     top_y = PAGE_H - 170
     box_w = (content_w - 12) / 2
@@ -1114,15 +1301,18 @@ def _draw_electricity_page(c, company, site, page_no, total_pages, bg_path, fg_p
 
     period_lines = [
         f"{strings['meta_period_label']}: {site['billing_period_label']}",
-        f"{strings['meta_period_start']}: {site['period_start'].strftime('%d %b %Y')}",
-        f"{strings['meta_period_end']}: {site['period_end'].strftime('%d %b %Y')}",
+        f"{strings['meta_period_start']}: {site['period_start'].strftime('%d %b %Y') if hasattr(site['period_start'], 'strftime') else site['period_start']}",
+        f"{strings['meta_period_end']}: {site['period_end'].strftime('%d %b %Y') if hasattr(site['period_end'], 'strftime') else site['period_end']}",
         f"{strings['meta_ref']}: {site['ref_no']}",
         f"{strings['meta_currency']}: {company['currency']}",
+        *distractor_lines,
     ]
-    draw_info_box(c, margin, top_y - 108, content_w, 84, strings["box_period"], period_lines, accent, accent_soft)
+    meta_height = _info_box_height(period_lines)
+    meta_bottom = top_y - 24 - meta_height
+    draw_info_box(c, margin, meta_bottom, content_w, meta_height, strings["box_period"], period_lines, accent, accent_soft)
 
     half_w = (content_w - 12) / 2
-    table_top = top_y - 120
+    table_top = meta_bottom - 12
     unit = site["unit"]
     site_omit = site.get("_omit", {})
     show_readings = not site_omit.get("start_reading")
@@ -1135,18 +1325,19 @@ def _draw_electricity_page(c, company, site, page_no, total_pages, bg_path, fg_p
         (strings["row_postcode"], site["postcode"]),
         (strings["row_meter_id"], site["meter_id"], True),
         (strings["row_unit"], unit),
-        (strings["row_total_qty"], f"{float(site['total_quantity']):,.2f} {unit}"),
+        (strings["row_total_qty"], f"{float(site['total_quantity']):,.2f} {unit}" if not isinstance(site["total_quantity"], str) else f"{site['total_quantity']} {unit}"),
     ]
+    meter_rows = [row for row in meter_rows if row[0] != strings["row_site"] or _has_visible_value(row[1])]
     if show_readings:
-        meter_rows.insert(5, (strings["row_start_read"], f"{site['start_reading']:,}"))
-        meter_rows.insert(6, (strings["row_end_read"], f"{site['end_reading']:,}"))
+        meter_rows.insert(5, (strings["row_start_read"], f"{site['start_reading']:,}" if isinstance(site["start_reading"], int) else str(site["start_reading"])))
+        meter_rows.insert(6, (strings["row_end_read"], f"{site['end_reading']:,}" if isinstance(site["end_reading"], int) else str(site["end_reading"])))
 
     grid_rows = []
     if show_emissions:
         grid_rows = [
-            (strings["row_supplier_ef"], f"{float(site['supplier_ef']):.4f}"),
-            (strings["row_emissions_kg"], f"{float(site['emissions_kg']):,.2f}"),
-            (strings["row_emissions_t"], f"{float(site['emissions_t']):.3f}"),
+            (strings["row_supplier_ef"], f"{float(site['supplier_ef']):.4f}" if not isinstance(site["supplier_ef"], str) else site["supplier_ef"]),
+            (strings["row_emissions_kg"], f"{float(site['emissions_kg']):,.2f}" if not isinstance(site.get("emissions_kg"), str) else site["emissions_kg"]),
+            (strings["row_emissions_t"], f"{float(site['emissions_t']):.3f}" if not isinstance(site.get("emissions_t"), str) else site["emissions_t"]),
         ]
 
     meter_h = (len(meter_rows) + 1) * 17
@@ -1194,11 +1385,145 @@ def _draw_electricity_page(c, company, site, page_no, total_pages, bg_path, fg_p
     c.showPage()
 
 
+def _draw_electricity_page_variant(c, company, site, page_no, total_pages, bg_path, fg_path, strings, layout_plan, distractor_lines=None, noise_level=1.0):
+    accent = company["accent"]
+    accent_soft = company["accent_soft"]
+    margin = 32
+    content_w = PAGE_W - margin * 2
+    distractor_lines = distractor_lines or []
+
+    def transposed_height(row_count, chunk_size=4, row_h=17):
+        chunk_count = (row_count + chunk_size - 1) // chunk_size
+        return chunk_count * row_h * 2 + max(0, chunk_count - 1) * 6
+
+    c.drawImage(ImageReader(bg_path), 0, 0, width=PAGE_W, height=PAGE_H, mask="auto")
+    c.saveState()
+    c.translate(PAGE_W / 2, PAGE_H / 2)
+    c.rotate(company["skew"] * noise_level + random.choice([-0.04, 0.03, 0.05]) * noise_level)
+    c.translate(-PAGE_W / 2, -PAGE_H / 2)
+
+    draw_logo(c, margin, PAGE_H - 72, accent, company["supplier"], strings)
+    c.setFillColor(HexColor("#1E2328"))
+    c.setFont(FONT_BOLD, 15)
+    c.drawRightString(PAGE_W - margin, PAGE_H - 50, strings["doc_title_heading"])
+    c.setFont(FONT_REG, 8.2)
+    c.drawRightString(PAGE_W - margin, PAGE_H - 64, strings["doc_subtitle"])
+    c.setFont(FONT_REG, 7.2)
+    c.drawRightString(PAGE_W - margin, PAGE_H - 77, _join_display_parts(site["billing_period_label"], company["label"], site["label"]))
+
+    unit = site["unit"]
+    site_omit = site.get("_omit", {})
+    show_readings = not site_omit.get("start_reading")
+    show_costs = not site_omit.get("total_cost")
+    show_emissions = not site_omit.get("supplier_ef")
+    symbol = site.get("currency_symbol", "")
+
+    meter_rows = [
+        (strings["row_site"], site["label"]),
+        (strings["row_city"], site["city"]),
+        (strings["row_postcode"], site["postcode"]),
+        (strings["row_meter_id"], site["meter_id"], True),
+        (strings["row_unit"], unit),
+        (strings["row_total_qty"], f"{float(site['total_quantity']):,.2f} {unit}" if not isinstance(site["total_quantity"], str) else f"{site['total_quantity']} {unit}"),
+    ]
+    meter_rows = [row for row in meter_rows if row[0] != strings["row_site"] or _has_visible_value(row[1])]
+    if show_readings:
+        meter_rows.insert(5, (strings["row_start_read"], f"{site['start_reading']:,}" if isinstance(site["start_reading"], int) else str(site["start_reading"])))
+        meter_rows.insert(6, (strings["row_end_read"], f"{site['end_reading']:,}" if isinstance(site["end_reading"], int) else str(site["end_reading"])))
+
+    grid_rows = []
+    if show_emissions:
+        grid_rows = [
+            (strings["row_supplier_ef"], f"{float(site['supplier_ef']):.4f}" if not isinstance(site["supplier_ef"], str) else site["supplier_ef"]),
+            (strings["row_emissions_kg"], f"{float(site['emissions_kg']):,.2f}" if not isinstance(site.get("emissions_kg"), str) else site["emissions_kg"]),
+            (strings["row_emissions_t"], f"{float(site['emissions_t']):.3f}" if not isinstance(site.get("emissions_t"), str) else site["emissions_t"]),
+        ]
+
+    current_top = PAGE_H - 170
+    section_order = layout_plan.get("section_order") or ["addresses", "period_meta", "meter_table", "grid_table", "tariff_table", "total_box", "footer"]
+    for section_name in section_order:
+        if section_name == "addresses":
+            box_w = (content_w - 12) / 2
+            bottom_y = current_top - 92
+            draw_info_box(c, margin, bottom_y, box_w, 92, strings["box_supplier"], company["supplier_address"], accent, accent_soft)
+            draw_info_box(c, margin + box_w + 12, bottom_y, box_w, 92, strings["box_customer"], site["customer_address"], accent, accent_soft)
+            current_top = bottom_y - 12
+        elif section_name == "period_meta":
+            period_lines = [
+                f"{strings['meta_period_label']}: {site['billing_period_label']}",
+                f"{strings['meta_period_start']}: {site['period_start'].strftime('%d %b %Y') if hasattr(site['period_start'], 'strftime') else site['period_start']}",
+                f"{strings['meta_period_end']}: {site['period_end'].strftime('%d %b %Y') if hasattr(site['period_end'], 'strftime') else site['period_end']}",
+                f"{strings['meta_ref']}: {site['ref_no']}",
+                f"{strings['meta_currency']}: {company['currency']}",
+                *distractor_lines,
+            ]
+            meta_height = _info_box_height(period_lines)
+            bottom_y = current_top - meta_height
+            draw_info_box(c, margin, bottom_y, content_w, meta_height, strings["box_period"], period_lines, accent, accent_soft)
+            current_top = bottom_y - 12
+        elif section_name == "meter_table":
+            if layout_plan.get("table_transforms", {}).get("meter_table") == "transposed":
+                c.setFillColor(HexColor(accent))
+                c.setFont(FONT_BOLD, 8.2)
+                c.drawString(margin + 3, current_top - 10, strings["tbl_meter"])
+                total_h = transposed_height(len(meter_rows), chunk_size=4)
+                _draw_transposed_pairs_pdf(c, margin, current_top - 18 - total_h, content_w, meter_rows, accent, accent_soft, row_h=17, chunk_size=4)
+                current_top -= total_h + 28
+            else:
+                total_h = (len(meter_rows) + 1) * 17
+                _draw_electricity_kv_table(c, margin, current_top - total_h, content_w, strings["tbl_meter"], meter_rows, accent, accent_soft)
+                current_top -= total_h + 12
+        elif section_name == "grid_table" and grid_rows:
+            if layout_plan.get("table_transforms", {}).get("grid_table") == "transposed":
+                c.setFillColor(HexColor(accent))
+                c.setFont(FONT_BOLD, 8.2)
+                c.drawString(margin + 3, current_top - 10, strings["tbl_grid"])
+                total_h = transposed_height(len(grid_rows), chunk_size=3)
+                _draw_transposed_pairs_pdf(c, margin, current_top - 18 - total_h, content_w, grid_rows, accent, accent_soft, row_h=17, chunk_size=3)
+                current_top -= total_h + 28
+            else:
+                total_h = (len(grid_rows) + 1) * 17
+                _draw_electricity_kv_table(c, margin, current_top - total_h, content_w, strings["tbl_grid"], grid_rows, accent, accent_soft)
+                current_top -= total_h + 12
+        elif section_name == "tariff_table" and site["tariffs"]:
+            tariff_h = _draw_electricity_tariff_table(
+                c,
+                margin,
+                current_top - (len(site["tariffs"]) + 2) * 17,
+                content_w,
+                strings["tbl_tariff"],
+                site["tariffs"],
+                accent,
+                accent_soft,
+                strings,
+                symbol,
+                show_costs=show_costs,
+            )
+            current_top -= tariff_h + 12
+        elif section_name == "total_box" and show_costs:
+            _draw_electricity_cost_box(c, margin, current_top - 55, content_w, 55, site, accent, accent_soft, strings)
+            current_top -= 67
+
+    c.restoreState()
+    c.setStrokeColor(HexColor("#C9CDD2"))
+    c.line(margin, 42, PAGE_W - margin, 42)
+    c.setFillColor(HexColor("#5A6066"))
+    c.setFont(FONT_REG, 6.0)
+    c.drawString(margin, 25, strings["footer_note"])
+    c.drawRightString(PAGE_W - margin, 25, strings["footer_page"].format(page=page_no, total=total_pages))
+
+    if noise_level > 0 and os.path.exists(fg_path):
+        c.drawImage(ImageReader(fg_path), 0, 0, width=PAGE_W, height=PAGE_H, mask="auto")
+    c.showPage()
+
+
 def _render_electricity_pdf(config, sections, output_path, noise_level=1.0):
     lang = config["document"].get("language", "en")
     strings = ELECTRICITY_TRANSLATIONS.get(lang, ELECTRICITY_TRANSLATIONS["en"])
     seed = config.get("random_seed", 42)
     bg_dir = config["document"].get("background_dir", "/tmp")
+    layout_plan = config["document"].get("layout_plan", {})
+    distractor_lines = _document_distractor_lines(config)
 
     bg_paths: dict[str, str] = {}
     fg_paths: dict[str, str] = {}
@@ -1221,17 +1546,33 @@ def _render_electricity_pdf(config, sections, output_path, noise_level=1.0):
         company = section["company"]
         site = section["site"]
         random.seed(seed + page_no)
-        _draw_electricity_page(
-            c,
-            company,
-            site,
-            page_no,
-            len(sections),
-            bg_paths[company["accent"]],
-            fg_paths[company["accent"]],
-            strings,
-            noise_level=noise_level,
-        )
+        if layout_plan.get("enabled"):
+            _draw_electricity_page_variant(
+                c,
+                company,
+                site,
+                page_no,
+                len(sections),
+                bg_paths[company["accent"]],
+                fg_paths[company["accent"]],
+                strings,
+                layout_plan,
+                distractor_lines,
+                noise_level=noise_level,
+            )
+        else:
+            _draw_electricity_page(
+                c,
+                company,
+                site,
+                page_no,
+                len(sections),
+                bg_paths[company["accent"]],
+                fg_paths[company["accent"]],
+                strings,
+                distractor_lines,
+                noise_level=noise_level,
+            )
     c.save()
     return output_path
 

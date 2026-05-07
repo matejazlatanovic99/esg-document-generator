@@ -14,6 +14,7 @@ from utils.config import (
     validate_raw_config_electricity,
     validate_raw_config_stationary,
 )
+from utils.document_catalog import supports_monthly_zip_export
 from utils.generator import generate_json_ground_truth
 
 FormRenderer = Callable[[Optional[str]], Optional[dict]]
@@ -72,10 +73,10 @@ class CategoryWorkflow:
         output_format: str | None,
         form_data: dict,
     ) -> bool:
-        return (
-            bool(form_data.get("doc_monthly_zip", False))
-            and (document_type or "") in {"utility_bill", "electricity_bill"}
-            and output_format in {"PDF", "DOCX"}
+        return bool(form_data.get("doc_monthly_zip", False)) and supports_monthly_zip_export(
+            self.key,
+            document_type or "",
+            output_format,
         )
 
 
@@ -94,7 +95,7 @@ CATEGORY_WORKFLOWS: dict[str, CategoryWorkflow] = {
         raw_config_builder=build_raw_config_electricity,
         validator=validate_raw_config_electricity,
         filename_category_slug="electricity",
-        ground_truth_builder=_build_empty_ground_truth,
+        ground_truth_builder=generate_json_ground_truth,
     ),
     "stationary_combustion": CategoryWorkflow(
         key="stationary_combustion",
