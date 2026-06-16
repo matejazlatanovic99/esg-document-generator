@@ -14,7 +14,10 @@ from utils.config import (
     validate_raw_config_electricity,
     validate_raw_config_stationary,
 )
-from utils.document_catalog import supports_monthly_zip_export
+from utils.document_catalog import (
+    supports_monthly_zip_export,
+    supports_multi_document_export,
+)
 from utils.generator import generate_json_ground_truth
 
 FormRenderer = Callable[[Optional[str]], Optional[dict]]
@@ -73,11 +76,17 @@ class CategoryWorkflow:
         output_format: str | None,
         form_data: dict,
     ) -> bool:
-        return bool(form_data.get("doc_monthly_zip", False)) and supports_monthly_zip_export(
+        monthly_zip = bool(form_data.get("doc_monthly_zip", False)) and supports_monthly_zip_export(
             self.key,
             document_type or "",
             output_format,
         )
+        multi_document_zip = int(form_data.get("doc_count", 1) or 1) > 1 and supports_multi_document_export(
+            self.key,
+            document_type or "",
+            output_format,
+        )
+        return monthly_zip or multi_document_zip
 
 
 CATEGORY_WORKFLOWS: dict[str, CategoryWorkflow] = {

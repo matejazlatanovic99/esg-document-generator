@@ -37,6 +37,18 @@ def render_invoice_defaults(fuels: list[str]) -> None:
     init_invoice_defaults(fuels)
     st.markdown("#### Fuel Invoice Defaults")
     st.caption("These defaults apply to every site unless you override them.")
+    st.number_input(
+        "Number of invoices to generate",
+        min_value=1,
+        max_value=200,
+        step=1,
+        key="stationary_invoice_doc_count",
+        help=(
+            "Each invoice is a separate one-time fuel purchase. Generate 1 for a single PDF, "
+            "or more to download them all as a ZIP archive. Extra invoices reuse the configured "
+            "company/site details with randomized quantities, prices, and dates."
+        ),
+    )
     col1, col2 = st.columns(2)
     with col1:
         randomize_fuel = st.checkbox(

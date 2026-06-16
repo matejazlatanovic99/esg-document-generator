@@ -32,6 +32,7 @@ def build_raw_config(
             "language": form_data.get("doc_language", "en"),
             "noise_level": float(form_data.get("doc_noise", 0.0)),
             "monthly_zip": bool(form_data.get("doc_monthly_zip", False)),
+            "doc_count": max(int(form_data.get("doc_count", 1) or 1), 1),
             "inject_special_chars": bool(form_data.get("doc_inject_special_chars", False)),
             "distractor_fields": {
                 "enabled": bool(form_data.get("doc_distractor_fields_enabled", False)),
@@ -83,6 +84,7 @@ def build_raw_config_stationary(form_data: dict) -> dict:
         document_overrides={
             "bems_interval_minutes": int(form_data.get("bems_interval_minutes", 60)),
             "bems_report_type": form_data.get("bems_report_type", "equipment_trend_report"),
+            "fuel_card_vat_rate": int(form_data.get("fuel_card_vat_rate", 20) or 0),
         },
     )
 

@@ -31,6 +31,7 @@ DOCUMENT_TYPES: dict[str, dict[str, dict]] = {
             "default_title": "Stationary Combustion Fuel Invoice",
             "default_subject": "Scope 1 stationary combustion fuel purchase",
             "company_currency_required": True,
+            "multi_document_formats": ["PDF", "DOCX"],
         },
         "generator_log": {
             "label": "Generator Log",
@@ -154,3 +155,17 @@ def supports_monthly_zip_export(
     if output_format is None:
         return bool(monthly_zip_formats)
     return output_format in monthly_zip_formats
+
+
+def supports_multi_document_export(
+    category_key: str,
+    document_type_key: str,
+    output_format: str | None = None,
+) -> bool:
+    """Whether a document type can generate a chosen number of documents and
+    package multiples into a ZIP archive (single still exports as one file)."""
+    config = get_document_type_config(category_key, document_type_key)
+    multi_document_formats = set(config.get("multi_document_formats", []))
+    if output_format is None:
+        return bool(multi_document_formats)
+    return output_format in multi_document_formats

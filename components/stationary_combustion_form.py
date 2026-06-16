@@ -1204,9 +1204,17 @@ def render_stationary_combustion_form(document_type: str | None) -> dict:
     fp_end: date = s.get("fp_end", date(2026, 1, 31))
     default_title, default_subject = _document_defaults(document_type)
 
+    doc_count_keys = {
+        "fuel_invoice": "stationary_invoice_doc_count",
+        "fuel_card": "stationary_fuel_card_doc_count",
+    }
+    doc_count = int(s.get(doc_count_keys.get(document_type, ""), 1) or 1)
+
     return {
         "_category": "stationary_combustion",
         "document_type": document_type or "fuel_invoice",
+        "doc_count": doc_count,
+        "fuel_card_vat_rate": int(s.get("stationary_fuel_card_vat_rate", 20) or 0),
         "doc_title": s.get("doc_title", default_title),
         "doc_subject": s.get("doc_subject", default_subject),
         "doc_seed": int(s.get("doc_seed", 20260415)),

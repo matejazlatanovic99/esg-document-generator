@@ -21,6 +21,8 @@ def init_fuel_card_defaults(fuels: list[str]) -> None:
     st.session_state.setdefault("stationary_fuel_card_unit_randomize", True)
     st.session_state.setdefault("stationary_fuel_card_quantity_randomize", True)
     st.session_state.setdefault("stationary_fuel_card_unit_price_randomize", True)
+    st.session_state.setdefault("stationary_fuel_card_vat_rate", 20)
+    st.session_state.setdefault("stationary_fuel_card_doc_count", 12)
     if "stationary_fuel_card_quantity" in st.session_state:
         return
     rng = random.Random(20260418)
@@ -34,6 +36,29 @@ def render_fuel_card_defaults(fuels: list[str]) -> None:
     init_fuel_card_defaults(fuels)
     st.markdown("#### Fuel Card Defaults")
     st.caption("These defaults apply to each transaction line unless you override them.")
+    col_count, col_vat = st.columns(2)
+    with col_count:
+        st.number_input(
+            "Number of line items (transactions)",
+            min_value=1,
+            max_value=500,
+            step=1,
+            key="stationary_fuel_card_doc_count",
+            help=(
+                "How many transaction lines appear on each statement. The configured transaction "
+                "details seed the first lines; any extra lines reuse them with randomized dates, "
+                "quantities, and prices, all within the statement period."
+            ),
+        )
+    with col_vat:
+        st.number_input(
+            "VAT Rate (%)",
+            min_value=0,
+            max_value=100,
+            step=1,
+            key="stationary_fuel_card_vat_rate",
+            help="Used for the Net / VAT / Gross breakdown shown in the statement totals.",
+        )
     col1, col2 = st.columns(2)
     with col1:
         randomize_fuel = st.checkbox(

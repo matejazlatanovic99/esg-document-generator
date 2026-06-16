@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import random
+import re
+import zipfile
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -46,7 +48,9 @@ _FUEL_INVOICE_FIELD_TYPES: dict[str, str] = {
     "fuel": FTYPE_TEXT,
     "customer_code": FTYPE_IDENTIFIER,
     "invoice_no": FTYPE_IDENTIFIER,
-    "period_label": FTYPE_DATE_TIME,
+    "invoiced_date": FTYPE_DATE_TIME,
+    "received_date": FTYPE_DATE_TIME,
+    "due_date": FTYPE_DATE_TIME,
     "quantity": FTYPE_NUMERIC,
     "unit_price": FTYPE_NUMERIC,
     "fuel_cost": FTYPE_NUMERIC,
@@ -124,6 +128,9 @@ STATIONARY_TRANSLATIONS: dict[str, dict[str, str]] = {
         "invoice_no": "Invoice No",
         "invoice_date": "Invoice Date",
         "billing_period": "Billing Period",
+        "invoiced_date": "Invoiced Date",
+        "received_date": "Received Date",
+        "due_date": "Due Date",
         "currency": "Currency",
         "country": "Country",
         "product": "Product",
@@ -168,6 +175,9 @@ STATIONARY_TRANSLATIONS: dict[str, dict[str, str]] = {
         "reference": "Reference",
         "qty": "Qty",
         "statement_total": "Statement Total",
+        "net_amount": "Net Amount",
+        "vat": "VAT",
+        "gross_amount": "Gross Amount",
         "fuel_card_footer": "Statement generated for stationary-equipment fuel-card QA.",
         "account_details": "Account Details",
         "statement_details": "Statement Details",
@@ -214,6 +224,9 @@ STATIONARY_TRANSLATIONS: dict[str, dict[str, str]] = {
         "invoice_no": "No de facture",
         "invoice_date": "Date de facture",
         "billing_period": "Periode de facturation",
+        "invoiced_date": "Date de facturation",
+        "received_date": "Date de reception",
+        "due_date": "Date d'echeance",
         "currency": "Devise",
         "country": "Pays",
         "product": "Produit",
@@ -258,6 +271,9 @@ STATIONARY_TRANSLATIONS: dict[str, dict[str, str]] = {
         "reference": "Reference",
         "qty": "Qt",
         "statement_total": "Total du releve",
+        "net_amount": "Montant net",
+        "vat": "TVA",
+        "gross_amount": "Montant brut",
         "fuel_card_footer": "Releve genere pour l'assurance qualite des cartes carburant d'equipements stationnaires.",
         "account_details": "Details du compte",
         "statement_details": "Details du releve",
@@ -304,6 +320,9 @@ STATIONARY_TRANSLATIONS: dict[str, dict[str, str]] = {
         "invoice_no": "Rechnungsnr.",
         "invoice_date": "Rechnungsdatum",
         "billing_period": "Abrechnungszeitraum",
+        "invoiced_date": "Rechnungsdatum",
+        "received_date": "Eingangsdatum",
+        "due_date": "Faelligkeitsdatum",
         "currency": "Wahrung",
         "country": "Land",
         "product": "Produkt",
@@ -348,6 +367,9 @@ STATIONARY_TRANSLATIONS: dict[str, dict[str, str]] = {
         "reference": "Referenz",
         "qty": "Menge",
         "statement_total": "Abrechnungssumme",
+        "net_amount": "Nettobetrag",
+        "vat": "MwSt.",
+        "gross_amount": "Bruttobetrag",
         "fuel_card_footer": "Abrechnung fur die QS stationarer Tankkartenvorgange erstellt.",
         "account_details": "Kontodetails",
         "statement_details": "Abrechnungsdetails",
@@ -394,6 +416,9 @@ STATIONARY_TRANSLATIONS: dict[str, dict[str, str]] = {
         "invoice_no": "Factuurnr.",
         "invoice_date": "Factuurdatum",
         "billing_period": "Facturatieperiode",
+        "invoiced_date": "Factuurdatum",
+        "received_date": "Ontvangstdatum",
+        "due_date": "Vervaldatum",
         "currency": "Valuta",
         "country": "Land",
         "product": "Product",
@@ -438,6 +463,9 @@ STATIONARY_TRANSLATIONS: dict[str, dict[str, str]] = {
         "reference": "Referentie",
         "qty": "Aantal",
         "statement_total": "Totaal overzicht",
+        "net_amount": "Nettobedrag",
+        "vat": "Btw",
+        "gross_amount": "Brutobedrag",
         "fuel_card_footer": "Overzicht gegenereerd voor QA van tankkaarttransacties voor stationaire apparatuur.",
         "account_details": "Accountgegevens",
         "statement_details": "Overzichtsgegevens",
@@ -819,6 +847,44 @@ def _iter_company_sites(raw_config: dict):
             yield company_index, site_index, company, site
 
 
+def _multi_document_count(raw_config: dict) -> int:
+    """How many separate documents the user asked to generate (>= 1)."""
+    try:
+        count = int(raw_config.get("document", {}).get("doc_count", 1) or 1)
+    except (TypeError, ValueError):
+        count = 1
+    return max(count, 1)
+
+
+def _is_multi_document(raw_config: dict) -> bool:
+    return _multi_document_count(raw_config) > 1
+
+
+def _slugify_filename(value: str, fallback: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip()).strip("_")
+    return slug or fallback
+
+
+def _build_zip_archive(documents: list[tuple[str, bytes]]) -> bytes:
+    archive_buffer = BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for filename, content in documents:
+            archive.writestr(filename, content)
+    return archive_buffer.getvalue()
+
+
+def _zip_documents(raw_config: dict, items: list[dict], render_one, name_for, ext: str) -> bytes:
+    """Render each item as its own file and bundle them into a ZIP archive."""
+    documents: list[tuple[str, bytes]] = []
+    for index, item in enumerate(items):
+        documents.append((name_for(item, index, ext), render_one(raw_config, [item])))
+    return _build_zip_archive(documents)
+
+
+def _fuel_invoice_filename(record: dict, index: int, ext: str) -> str:
+    return f"{_slugify_filename(record.get('invoice_no'), f'invoice_{index + 1:04d}')}.{ext}"
+
+
 def _site_equipment_items(raw_config: dict, site: dict, *, include_emission_source: bool) -> list[dict]:
     site_omit = site.get("_omit", {})
     equipment_omitted = bool(site_omit.get("equipment", False))
@@ -897,16 +963,16 @@ def _site_equipment_items(raw_config: dict, site: dict, *, include_emission_sour
     return equipment_items or [{"equipment": "", "emission_source": ""}]
 
 
-def _build_fuel_invoice_records(raw_config: dict) -> list[dict]:
-    fp = _financial_period(raw_config)
+def _build_fuel_invoice_base_records(raw_config: dict) -> list[dict]:
+    """One template record per configured company/site/equipment line. These seed
+    the generated invoices; invoice numbers and dates are assigned per document."""
     records: list[dict] = []
-    seed = int(raw_config.get("random_seed", 42))
 
     for company_index, site_index, company, site in _iter_company_sites(raw_config):
         site_omit = site.get("_omit", {})
         equipment_items = _site_equipment_items(raw_config, site, include_emission_source=True)
 
-        for equipment_index, equipment_item in enumerate(equipment_items, start=1):
+        for equipment_item in equipment_items:
             quantity = _q2(_parse_decimal(equipment_item.get("quantity"), "0"))
             unit_price = _q2(_parse_decimal(equipment_item.get("unit_price"), "0"))
             delivery_charge = _q2(_parse_decimal(equipment_item.get("delivery_charge"), "0"))
@@ -915,19 +981,11 @@ def _build_fuel_invoice_records(raw_config: dict) -> list[dict]:
             subtotal = _q2(fuel_cost + delivery_charge)
             vat = _q2(subtotal * vat_rate / Decimal("100"))
             total = _q2(subtotal + vat)
-            rng = random.Random(f"{seed}:fuel_invoice:{company_index}:{site_index}:{equipment_index}")
-            invoice_date = fp["end_date"] + timedelta(days=rng.randint(2, 8))
-            invoice_suffix = f"{company_index:02d}{site_index:02d}"
-            if len(equipment_items) > 1:
-                invoice_suffix = f"{invoice_suffix}-{equipment_index:02d}"
-            invoice_no = (
-                f"{company.get('supplier_code', 'INV')}-{fp['start_date'].strftime('%Y%m')}"
-                f"-{invoice_suffix}"
-            )
 
-            record = {
+            records.append({
                 "company": _with_special_chars(raw_config, company.get("label", "")),
                 "supplier": _with_special_chars(raw_config, company.get("supplier", "")),
+                "supplier_code": company.get("supplier_code", "INV"),
                 "supplier_address": [
                     _with_special_chars(raw_config, line) for line in company.get("supplier_address", [])
                 ],
@@ -949,13 +1007,61 @@ def _build_fuel_invoice_records(raw_config: dict) -> list[dict]:
                 "vat": vat,
                 "total": total,
                 "currency": company.get("currency", "GBP (£)"),
-                "invoice_no": invoice_no,
-                "invoice_date": invoice_date,
-                "period_label": fp["label"],
-                "period_start": fp["start_date"],
-                "period_end": fp["end_date"],
-            }
-            records.append(record)
+            })
+    return records
+
+
+def _build_fuel_invoice_records(raw_config: dict) -> list[dict]:
+    fp = _financial_period(raw_config)
+    seed = int(raw_config.get("random_seed", 42))
+    base_records = _build_fuel_invoice_base_records(raw_config)
+    if not base_records:
+        return []
+
+    count = _multi_document_count(raw_config)
+    days_in_period = max((fp["end_date"] - fp["start_date"]).days, 0)
+    records: list[dict] = []
+
+    for document_index in range(count):
+        template = base_records[document_index % len(base_records)]
+        record = dict(template)
+        rng = random.Random(f"{seed}:fuel_invoice_doc:{document_index}")
+
+        # Documents beyond the configured lines reuse the company/site identity but
+        # get fresh randomized quantities and prices so every invoice is distinct.
+        if document_index >= len(base_records):
+            quantity = _q2(Decimal(rng.randrange(1200, 6000, 50)))
+            unit_price = _q2(Decimal(str(round(rng.uniform(0.88, 1.35), 2))))
+            delivery_charge = _q2(Decimal(str(round(rng.uniform(20.0, 95.0), 2))))
+            vat_rate = _parse_decimal(record.get("vat_rate"), "20")
+            fuel_cost = _q2(quantity * unit_price)
+            subtotal = _q2(fuel_cost + delivery_charge)
+            vat = _q2(subtotal * vat_rate / Decimal("100"))
+            total = _q2(subtotal + vat)
+            record.update({
+                "quantity": quantity,
+                "unit_price": unit_price,
+                "delivery_charge": delivery_charge,
+                "fuel_cost": fuel_cost,
+                "subtotal": subtotal,
+                "vat": vat,
+                "total": total,
+            })
+
+        # One-time purchase dates rather than a billing period.
+        invoiced_date = fp["start_date"] + timedelta(days=rng.randint(0, days_in_period))
+        received_date = invoiced_date + timedelta(days=rng.randint(0, 4))
+        due_date = invoiced_date + timedelta(days=rng.randint(14, 30))
+        invoice_no = f"{record.get('supplier_code', 'INV')}-{invoiced_date.strftime('%Y%m')}-{document_index + 1:04d}"
+
+        record.update({
+            "invoice_no": invoice_no,
+            "invoiced_date": invoiced_date,
+            "received_date": received_date,
+            "due_date": due_date,
+        })
+        records.append(record)
+
     return records
 
 
@@ -1003,7 +1109,7 @@ def _build_delivery_note_records(raw_config: dict) -> list[dict]:
     return records
 
 
-def _build_fuel_card_statements(raw_config: dict) -> list[dict]:
+def _build_fuel_card_base_statements(raw_config: dict) -> list[dict]:
     fp = _financial_period(raw_config)
     seed = int(raw_config.get("random_seed", 42))
     days_in_period = max((fp["end_date"] - fp["start_date"]).days, 0)
@@ -1054,6 +1160,90 @@ def _build_fuel_card_statements(raw_config: dict) -> list[dict]:
             "statement_total": _q2(sum((row["total"] for row in transactions), Decimal("0"))),
         })
 
+    return statements
+
+
+def _fuel_card_vat_rate(raw_config: dict) -> Decimal:
+    return _parse_decimal(raw_config.get("document", {}).get("fuel_card_vat_rate", 20), "20")
+
+
+def _apply_fuel_card_totals(statement: dict, vat_rate: Decimal) -> dict:
+    """Add Net / VAT / Gross totals to a statement (UK/Ireland-style breakdown)."""
+    net_total = _q2(sum((row["total"] for row in statement["transactions"]), Decimal("0")))
+    vat_amount = _q2(net_total * vat_rate / Decimal("100"))
+    gross_total = _q2(net_total + vat_amount)
+    statement["net_total"] = net_total
+    statement["vat_rate"] = vat_rate
+    statement["vat_amount"] = vat_amount
+    statement["gross_total"] = gross_total
+    statement["statement_total"] = gross_total
+    return statement
+
+
+def _fuel_card_summary_rows(raw_config: dict, statement: dict) -> list[tuple[str, Any, bool]]:
+    """(label, amount, is_total) rows for the Net / VAT / Gross statement summary."""
+    return [
+        (_tr(raw_config, "net_amount"), statement["net_total"], False),
+        (f"{_tr(raw_config, 'vat')} ({statement['vat_rate']}%)", statement["vat_amount"], False),
+        (_tr(raw_config, "gross_amount"), statement["gross_total"], True),
+    ]
+
+
+def _add_fuel_card_totals_docx(document, raw_config: dict, statement: dict, currency_symbol: str) -> None:
+    rows = _fuel_card_summary_rows(raw_config, statement)
+    totals = document.add_table(rows=len(rows), cols=2)
+    totals.style = "Table Grid"
+    for row_idx, (label, amount, is_total) in enumerate(rows):
+        _shade_docx_cell(totals.cell(row_idx, 0), "F5F8FB")
+        _set_docx_cell_text(totals.cell(row_idx, 0), label, bold=True)
+        _set_docx_cell_text(totals.cell(row_idx, 1), f"{currency_symbol}{_fmt_money(amount)}", bold=is_total)
+
+
+def _expand_fuel_card_transactions(statement: dict, count: int, rng: random.Random) -> list[dict]:
+    """Produce exactly `count` transaction lines for a statement. The configured
+    transactions seed the first lines; extra lines reuse them with randomized
+    dates, quantities, and prices, all within the statement period."""
+    base_transactions = statement["transactions"]
+    if not base_transactions:
+        return []
+
+    fp_start = statement["period_start"]
+    days_in_period = max((statement["period_end"] - fp_start).days, 0)
+    transactions: list[dict] = []
+    for line_index in range(count):
+        template = base_transactions[line_index % len(base_transactions)]
+        transaction = dict(template)
+        if line_index >= len(base_transactions):
+            quantity = _q2(Decimal(rng.randrange(150, 700, 10)))
+            unit_price = _q2(Decimal(str(round(rng.uniform(0.95, 1.45), 2))))
+            transaction.update({
+                "date": fp_start + timedelta(days=rng.randint(0, days_in_period)),
+                "quantity": quantity,
+                "unit_price": unit_price,
+                "total": _q2(quantity * unit_price),
+            })
+        transactions.append(transaction)
+    transactions.sort(key=lambda row: (row["date"], row["merchant"], row["card_number"]))
+    return transactions
+
+
+def _build_fuel_card_statements(raw_config: dict) -> list[dict]:
+    seed = int(raw_config.get("random_seed", 42))
+    base_statements = _build_fuel_card_base_statements(raw_config)
+    if not base_statements:
+        return []
+
+    line_item_count = _multi_document_count(raw_config)
+    vat_rate = _fuel_card_vat_rate(raw_config)
+    statements: list[dict] = []
+    for statement_index, statement in enumerate(base_statements):
+        new_statement = dict(statement)
+        new_statement["transactions"] = _expand_fuel_card_transactions(
+            statement,
+            line_item_count,
+            random.Random(f"{seed}:fuel_card_lines:{statement_index}"),
+        )
+        statements.append(_apply_fuel_card_totals(new_statement, vat_rate))
     return statements
 
 
@@ -1324,7 +1514,10 @@ def _ground_truth_entries(raw_config: dict) -> list[dict]:
                 "Company": record["company"],
                 "Site": record["site"],
                 "Country": record["country"],
-                "Period": f"{record['period_start'].isoformat() if hasattr(record['period_start'], 'isoformat') else record['period_start']} to {record['period_end'].isoformat() if hasattr(record['period_end'], 'isoformat') else record['period_end']}",
+                "Invoice No": record["invoice_no"],
+                "Invoiced date": record["invoiced_date"].isoformat() if hasattr(record["invoiced_date"], "isoformat") else record["invoiced_date"],
+                "Received date": record["received_date"].isoformat() if hasattr(record["received_date"], "isoformat") else record["received_date"],
+                "Due date": record["due_date"].isoformat() if hasattr(record["due_date"], "isoformat") else record["due_date"],
                 "Equipment": record["equipment"],
                 "Emission source": record["emission_source"],
                 "Fuel": record["fuel"],
@@ -1465,6 +1658,12 @@ def _set_docx_cell_text(cell, text: str, *, bold: bool = False, color: str | Non
 
 def generate_fuel_invoice_pdf(raw_config: dict) -> bytes:
     records = _corrupted_fuel_invoice_records(raw_config)
+    if _is_multi_document(raw_config):
+        return _zip_documents(raw_config, records, _render_fuel_invoice_pdf, _fuel_invoice_filename, "pdf")
+    return _render_fuel_invoice_pdf(raw_config, records)
+
+
+def _render_fuel_invoice_pdf(raw_config: dict, records: list[dict]) -> bytes:
     distractor_plan = _stationary_distractor_plan(raw_config, "PDF", document_type="fuel_invoice")
     layout_plan = _stationary_layout_plan(raw_config, "PDF")
     if layout_plan.get("enabled"):
@@ -1485,8 +1684,6 @@ def generate_fuel_invoice_pdf(raw_config: dict) -> bytes:
         c.setFillColor(colors.white)
         c.setFont("Helvetica-Bold", 14)
         c.drawString(48, PAGE_H - 62, record["supplier"])
-        c.setFont("Helvetica", 8)
-        c.drawRightString(PAGE_W - 48, PAGE_H - 61, _tr(raw_config, "fuel_invoice_title"))
 
         c.setFillColor(colors.black)
         c.setFont("Helvetica", 10)
@@ -1504,8 +1701,9 @@ def generate_fuel_invoice_pdf(raw_config: dict) -> bytes:
         c.setFont("Helvetica", 10)
         meta_lines = [
             f"{_tr(raw_config, 'invoice_no')}: {record['invoice_no']}",
-            f"{_tr(raw_config, 'invoice_date')}: {_fmt_date(record['invoice_date'])}",
-            f"{_tr(raw_config, 'billing_period')}: {_fmt_date(record['period_start'])} - {_fmt_date(record['period_end'])}",
+            f"{_tr(raw_config, 'invoiced_date')}: {_fmt_date(record['invoiced_date'])}",
+            f"{_tr(raw_config, 'received_date')}: {_fmt_date(record['received_date'])}",
+            f"{_tr(raw_config, 'due_date')}: {_fmt_date(record['due_date'])}",
             f"{_tr(raw_config, 'currency')}: {record['currency']}",
             f"{_tr(raw_config, 'country')}: {record['country']}",
             *_stationary_document_lines(distractor_plan, placement="meta"),
@@ -1615,8 +1813,6 @@ def _generate_fuel_invoice_pdf_variant(raw_config: dict, records: list[dict], la
         c.setFillColor(colors.white)
         c.setFont("Helvetica-Bold", 14)
         c.drawString(48, PAGE_H - 62, record["supplier"])
-        c.setFont("Helvetica", 8)
-        c.drawRightString(PAGE_W - 48, PAGE_H - 61, _tr(raw_config, "fuel_invoice_title"))
 
         current_top = PAGE_H - 108
         section_order = [section for section in (layout_plan.get("section_order") or ["addresses", "meta", "line_items", "totals", "footer"]) if section in {"addresses", "meta", "line_items", "totals"}]
@@ -1637,8 +1833,9 @@ def _generate_fuel_invoice_pdf_variant(raw_config: dict, records: list[dict], la
                 c.setFont("Helvetica", 10)
                 meta_lines = [
                     f"{_tr(raw_config, 'invoice_no')}: {record['invoice_no']}",
-                    f"{_tr(raw_config, 'invoice_date')}: {_fmt_date(record['invoice_date'])}",
-                    f"{_tr(raw_config, 'billing_period')}: {_fmt_date(record['period_start'])} - {_fmt_date(record['period_end'])}",
+                    f"{_tr(raw_config, 'invoiced_date')}: {_fmt_date(record['invoiced_date'])}",
+                    f"{_tr(raw_config, 'received_date')}: {_fmt_date(record['received_date'])}",
+                    f"{_tr(raw_config, 'due_date')}: {_fmt_date(record['due_date'])}",
                     f"{_tr(raw_config, 'currency')}: {record['currency']}",
                     f"{_tr(raw_config, 'country')}: {record['country']}",
                     *_stationary_document_lines(distractor_plan, placement="meta"),
@@ -1709,6 +1906,12 @@ def _generate_fuel_invoice_pdf_variant(raw_config: dict, records: list[dict], la
 
 def generate_fuel_invoice_docx(raw_config: dict) -> bytes:
     records = _corrupted_fuel_invoice_records(raw_config)
+    if _is_multi_document(raw_config):
+        return _zip_documents(raw_config, records, _render_fuel_invoice_docx, _fuel_invoice_filename, "docx")
+    return _render_fuel_invoice_docx(raw_config, records)
+
+
+def _render_fuel_invoice_docx(raw_config: dict, records: list[dict]) -> bytes:
     distractor_plan = _stationary_distractor_plan(raw_config, "DOCX", document_type="fuel_invoice")
     layout_plan = _stationary_layout_plan(raw_config, "DOCX")
     if layout_plan.get("enabled"):
@@ -1720,7 +1923,6 @@ def generate_fuel_invoice_docx(raw_config: dict) -> bytes:
 
     for index, record in enumerate(records):
         document.add_heading(record["supplier"], level=1)
-        document.add_paragraph(_tr(raw_config, "fuel_invoice_title"))
 
         top_table = document.add_table(rows=2, cols=2)
         top_table.style = "Table Grid"
@@ -1728,8 +1930,9 @@ def generate_fuel_invoice_docx(raw_config: dict) -> bytes:
         top_table.cell(0, 1).text = _tr(raw_config, "delivery_site")
         top_table.cell(1, 0).text = (
             f"{_tr(raw_config, 'invoice_no')}: {record['invoice_no']}\n"
-            f"{_tr(raw_config, 'invoice_date')}: {_fmt_date(record['invoice_date'])}\n"
-            f"{_tr(raw_config, 'billing_period')}: {_fmt_date(record['period_start'])} - {_fmt_date(record['period_end'])}\n"
+            f"{_tr(raw_config, 'invoiced_date')}: {_fmt_date(record['invoiced_date'])}\n"
+            f"{_tr(raw_config, 'received_date')}: {_fmt_date(record['received_date'])}\n"
+            f"{_tr(raw_config, 'due_date')}: {_fmt_date(record['due_date'])}\n"
             f"{_tr(raw_config, 'currency')}: {record['currency']}\n"
             f"{_tr(raw_config, 'country')}: {record['country']}"
             + ("\n" + "\n".join(_stationary_document_lines(distractor_plan, placement="meta")) if _stationary_document_lines(distractor_plan, placement="meta") else "")
@@ -1810,7 +2013,6 @@ def _generate_fuel_invoice_docx_variant(raw_config: dict, records: list[dict], l
 
     for index, record in enumerate(records):
         document.add_heading(record["supplier"], level=1)
-        document.add_paragraph(_tr(raw_config, "fuel_invoice_title"))
 
         def render_addresses() -> None:
             document.add_paragraph("\n".join(record["supplier_address"]))
@@ -1825,8 +2027,9 @@ def _generate_fuel_invoice_docx_variant(raw_config: dict, records: list[dict], l
             top_table.cell(0, 1).text = _tr(raw_config, "delivery_site")
             top_table.cell(1, 0).text = (
                 f"{_tr(raw_config, 'invoice_no')}: {record['invoice_no']}\n"
-                f"{_tr(raw_config, 'invoice_date')}: {_fmt_date(record['invoice_date'])}\n"
-                f"{_tr(raw_config, 'billing_period')}: {_fmt_date(record['period_start'])} - {_fmt_date(record['period_end'])}\n"
+                f"{_tr(raw_config, 'invoiced_date')}: {_fmt_date(record['invoiced_date'])}\n"
+                f"{_tr(raw_config, 'received_date')}: {_fmt_date(record['received_date'])}\n"
+                f"{_tr(raw_config, 'due_date')}: {_fmt_date(record['due_date'])}\n"
                 f"{_tr(raw_config, 'currency')}: {record['currency']}\n"
                 f"{_tr(raw_config, 'country')}: {record['country']}"
                 + ("\n" + "\n".join(_stationary_document_lines(distractor_plan, placement="meta")) if _stationary_document_lines(distractor_plan, placement="meta") else "")
@@ -2203,7 +2406,10 @@ def _generate_delivery_note_docx_variant(raw_config: dict, records: list[dict], 
 
 
 def generate_fuel_card_pdf(raw_config: dict) -> bytes:
-    statements = _corrupted_fuel_card_statements(raw_config)
+    return _render_fuel_card_pdf(raw_config, _corrupted_fuel_card_statements(raw_config))
+
+
+def _render_fuel_card_pdf(raw_config: dict, statements: list[dict]) -> bytes:
     distractor_plan = _stationary_distractor_plan(raw_config, "PDF", document_type="fuel_card")
     layout_plan = _stationary_layout_plan(raw_config, "PDF")
     if layout_plan.get("enabled"):
@@ -2286,9 +2492,12 @@ def generate_fuel_card_pdf(raw_config: dict) -> bytes:
                 row_y -= 18
 
             if page_start + page_size >= len(transactions):
-                c.setFont("Helvetica-Bold", 10)
-                c.drawRightString(PAGE_W - 180, row_y - 18, _tr(raw_config, "statement_total"))
-                c.drawRightString(PAGE_W - 48, row_y - 18, f"{currency_symbol}{_fmt_money(statement['statement_total'])}")
+                summary_y = row_y - 18
+                for label, amount, is_total in _fuel_card_summary_rows(raw_config, statement):
+                    c.setFont("Helvetica-Bold" if is_total else "Helvetica", 10)
+                    c.drawRightString(PAGE_W - 180, summary_y, label)
+                    c.drawRightString(PAGE_W - 48, summary_y, f"{currency_symbol}{_fmt_money(amount)}")
+                    summary_y -= 16
 
             c.setFont("Helvetica", 8)
             c.setFillColor(colors.grey)
@@ -2382,10 +2591,13 @@ def _generate_fuel_card_pdf_variant(raw_config: dict, statements: list[dict], la
                         row_y -= 18
 
                     if page_start + page_size >= len(transactions):
-                        c.setFont("Helvetica-Bold", 10)
-                        c.drawRightString(PAGE_W - 180, row_y - 18, _tr(raw_config, "statement_total"))
-                        c.drawRightString(PAGE_W - 48, row_y - 18, f"{currency_symbol}{_fmt_money(statement['statement_total'])}")
-                        row_y -= 34
+                        summary_y = row_y - 18
+                        for label, amount, is_total in _fuel_card_summary_rows(raw_config, statement):
+                            c.setFont("Helvetica-Bold" if is_total else "Helvetica", 10)
+                            c.drawRightString(PAGE_W - 180, summary_y, label)
+                            c.drawRightString(PAGE_W - 48, summary_y, f"{currency_symbol}{_fmt_money(amount)}")
+                            summary_y -= 16
+                        row_y = summary_y - 16
                     current_top = row_y - 10
 
             c.setFont("Helvetica", 8)
@@ -2397,7 +2609,10 @@ def _generate_fuel_card_pdf_variant(raw_config: dict, statements: list[dict], la
 
 
 def generate_fuel_card_docx(raw_config: dict) -> bytes:
-    statements = _corrupted_fuel_card_statements(raw_config)
+    return _render_fuel_card_docx(raw_config, _corrupted_fuel_card_statements(raw_config))
+
+
+def _render_fuel_card_docx(raw_config: dict, statements: list[dict]) -> bytes:
     distractor_plan = _stationary_distractor_plan(raw_config, "DOCX", document_type="fuel_card")
     layout_plan = _stationary_layout_plan(raw_config, "DOCX")
     if layout_plan.get("enabled"):
@@ -2477,11 +2692,7 @@ def generate_fuel_card_docx(raw_config: dict) -> bytes:
             for cell, value in zip(row, values):
                 _set_docx_cell_text(cell, str(value))
 
-        totals = document.add_table(rows=1, cols=2)
-        totals.style = "Table Grid"
-        _shade_docx_cell(totals.cell(0, 0), "F5F8FB")
-        _set_docx_cell_text(totals.cell(0, 0), _tr(raw_config, "statement_total"), bold=True)
-        _set_docx_cell_text(totals.cell(0, 1), f"{currency_symbol}{_fmt_money(statement['statement_total'])}", bold=True)
+        _add_fuel_card_totals_docx(document, raw_config, statement, currency_symbol)
 
         if statement_index < len(statements) - 1:
             document.add_page_break()
@@ -2570,11 +2781,7 @@ def _generate_fuel_card_docx_variant(raw_config: dict, statements: list[dict], l
                 for cell, value in zip(row, values):
                     _set_docx_cell_text(cell, str(value))
 
-            totals = document.add_table(rows=1, cols=2)
-            totals.style = "Table Grid"
-            _shade_docx_cell(totals.cell(0, 0), "F5F8FB")
-            _set_docx_cell_text(totals.cell(0, 0), _tr(raw_config, "statement_total"), bold=True)
-            _set_docx_cell_text(totals.cell(0, 1), f"{currency_symbol}{_fmt_money(statement['statement_total'])}", bold=True)
+            _add_fuel_card_totals_docx(document, raw_config, statement, currency_symbol)
 
         def render_footer() -> None:
             footer = document.add_paragraph()
@@ -2600,7 +2807,10 @@ def _generate_fuel_card_docx_variant(raw_config: dict, statements: list[dict], l
 
 
 def generate_fuel_card_xlsx(raw_config: dict) -> bytes:
-    statements = _corrupted_fuel_card_statements(raw_config)
+    return _render_fuel_card_xlsx(raw_config, _corrupted_fuel_card_statements(raw_config))
+
+
+def _render_fuel_card_xlsx(raw_config: dict, statements: list[dict]) -> bytes:
     layout_plan = _stationary_layout_plan(raw_config, "XLSX")
     distractor_plan = _stationary_distractor_plan(raw_config, "XLSX", document_type="fuel_card")
     distractor_fields = _stationary_distractor_field_map(distractor_plan)
@@ -2665,6 +2875,18 @@ def generate_fuel_card_xlsx(raw_config: dict) -> bytes:
                 sheet.cell(row=row_index, column=column_index, value=value)
             row_index += 1
 
+        row_index += 1
+        for label, amount, is_total in _fuel_card_summary_rows(raw_config, statement):
+            label_cell = sheet.cell(row=row_index, column=1, value=label)
+            label_cell.font = Font(bold=True)
+            amount_cell = sheet.cell(
+                row=row_index,
+                column=2,
+                value=float(amount) if not isinstance(amount, str) else amount,
+            )
+            amount_cell.font = Font(bold=is_total)
+            row_index += 1
+
         width_map = {
             "card_no": 12,
             "date": 12,
@@ -2690,7 +2912,10 @@ def generate_fuel_card_xlsx(raw_config: dict) -> bytes:
 
 
 def generate_fuel_card_csv(raw_config: dict) -> bytes:
-    statements = _corrupted_fuel_card_statements(raw_config)
+    return _render_fuel_card_csv(raw_config, _corrupted_fuel_card_statements(raw_config))
+
+
+def _render_fuel_card_csv(raw_config: dict, statements: list[dict]) -> bytes:
     layout_plan = _stationary_layout_plan(raw_config, "CSV")
     distractor_plan = _stationary_distractor_plan(raw_config, "CSV", document_type="fuel_card")
     distractor_fields = _stationary_distractor_field_map(distractor_plan)
@@ -2742,6 +2967,10 @@ def generate_fuel_card_csv(raw_config: dict) -> bytes:
                     statement_key=f"{statement['account_name']}:{statement['period_start'].isoformat()}:{statement['period_end'].isoformat()}",
                 )
             )
+
+        writer.writerow([])
+        for label, amount, _is_total in _fuel_card_summary_rows(raw_config, statement):
+            writer.writerow([label, _fmt_num(amount, ".2f")])
 
     return buffer.getvalue().encode("utf-8-sig")
 

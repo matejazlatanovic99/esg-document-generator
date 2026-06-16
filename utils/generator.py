@@ -33,7 +33,10 @@ from utils.distractor_fields import (
     normalize_distractor_settings,
     resolve_distractor_plan,
 )
-from utils.document_catalog import supports_monthly_zip_export
+from utils.document_catalog import (
+    supports_monthly_zip_export,
+    supports_multi_document_export,
+)
 from utils.layouts import apply_layout_suffix, normalize_layout_settings, resolve_layout_plan
 
 # ── field-type maps for corruption ───────────────────────────────────────────
@@ -408,7 +411,9 @@ def build_document_filename_base(raw_config: dict, *, output_format: str | None 
 
 
 def build_document_download_filename(raw_config: dict, output_format: str) -> str:
-    zip_export = _should_generate_monthly_zip(raw_config, output_format)
+    zip_export = _should_generate_monthly_zip(raw_config, output_format) or _should_generate_multi_document_zip(
+        raw_config, output_format
+    )
     extension = ".zip" if zip_export else f".{output_format.lower()}"
     artifact_key = "archive" if zip_export else "root"
     return build_document_filename_base(raw_config, output_format=output_format, artifact_key=artifact_key) + extension
@@ -416,6 +421,14 @@ def build_document_download_filename(raw_config: dict, output_format: str) -> st
 
 def _should_generate_monthly_zip(raw_config: dict, output_format: str) -> bool:
     return bool(raw_config.get("document", {}).get("monthly_zip", False)) and supports_monthly_zip_export(
+        _category_key(raw_config),
+        _document_type_key(raw_config),
+        output_format,
+    )
+
+
+def _should_generate_multi_document_zip(raw_config: dict, output_format: str) -> bool:
+    return int(raw_config.get("document", {}).get("doc_count", 1) or 1) > 1 and supports_multi_document_export(
         _category_key(raw_config),
         _document_type_key(raw_config),
         output_format,
