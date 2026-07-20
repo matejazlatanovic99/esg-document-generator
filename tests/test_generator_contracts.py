@@ -27,6 +27,7 @@ _CATEGORY_DISPATCH_KEY = {
     "purchased_heat_steam_cooling": "heat",
     "electricity": "electricity",
     "stationary_combustion": "stationary_combustion",
+    "mobile_combustion": "mobile_combustion",
 }
 
 
@@ -82,6 +83,18 @@ class GeneratorContractTests(unittest.TestCase):
             ("stationary bems time series docx", self._stationary_config("bems", bems_report_type="time_series_trend_export"), "DOCX"),
             ("stationary bems time series csv", self._stationary_config("bems", bems_report_type="time_series_trend_export"), "CSV"),
             ("stationary bems time series xlsx", self._stationary_config("bems", bems_report_type="time_series_trend_export"), "XLSX"),
+            ("mobile fuel invoice pdf", self._mobile_config("fuel_invoice"), "PDF"),
+            ("mobile fuel invoice docx", self._mobile_config("fuel_invoice"), "DOCX"),
+            ("mobile fuel card statement pdf", self._mobile_config("fuel_card_statement"), "PDF"),
+            ("mobile fuel card statement docx", self._mobile_config("fuel_card_statement"), "DOCX"),
+            ("mobile fuel card statement xlsx", self._mobile_config("fuel_card_statement"), "XLSX"),
+            ("mobile fuel card statement csv", self._mobile_config("fuel_card_statement"), "CSV"),
+            ("mobile telematics fuel xlsx", self._mobile_config("telematics_fuel"), "XLSX"),
+            ("mobile telematics fuel csv", self._mobile_config("telematics_fuel"), "CSV"),
+            ("mobile telematics trips xlsx", self._mobile_config("telematics_trips"), "XLSX"),
+            ("mobile telematics trips csv", self._mobile_config("telematics_trips"), "CSV"),
+            ("mobile telematics odometer xlsx", self._mobile_config("telematics_odometer"), "XLSX"),
+            ("mobile telematics odometer csv", self._mobile_config("telematics_odometer"), "CSV"),
         ]
 
         for label, raw_config, output_format in cases:
@@ -152,6 +165,55 @@ class GeneratorContractTests(unittest.TestCase):
         smart_meter_rows = build_smart_meter_rows(smart_meter_runtime_config, smart_meter_sections)
         smart_meter_ground_truth = json.loads(generate_json_ground_truth(smart_meter_config).decode("utf-8"))
         self.assertEqual(len(smart_meter_rows), len(smart_meter_ground_truth))
+
+    def test_mobile_ground_truth_is_non_empty_and_category_tagged(self) -> None:
+        for document_type in [
+            "fuel_invoice",
+            "fuel_card_statement",
+            "telematics_fuel",
+            "telematics_trips",
+            "telematics_odometer",
+        ]:
+            with self.subTest(document_type=document_type):
+                ground_truth = json.loads(
+                    generate_json_ground_truth(self._mobile_config(document_type)).decode("utf-8")
+                )
+                self.assertTrue(ground_truth)
+                self.assertTrue(all(row["Scope"] == "Scope 1" for row in ground_truth))
+                self.assertTrue(all(row["Category"] == "mobile_combustion" for row in ground_truth))
+
+    def test_cross_scope_line_items_are_tagged_with_true_category(self) -> None:
+        mobile_config = self._mobile_config("fuel_invoice")
+        mobile_config["document"]["cross_scope_items"] = True
+        mobile_ground_truth = json.loads(generate_json_ground_truth(mobile_config).decode("utf-8"))
+        self.assertEqual(
+            {"mobile_combustion", "stationary_combustion"},
+            {row["Category"] for row in mobile_ground_truth},
+        )
+
+        stationary_config = self._stationary_config("fuel_invoice")
+        stationary_config["document"]["cross_scope_items"] = True
+        stationary_ground_truth = json.loads(generate_json_ground_truth(stationary_config).decode("utf-8"))
+        self.assertEqual(
+            {"mobile_combustion", "stationary_combustion"},
+            {row["Category"] for row in stationary_ground_truth},
+        )
+        payload = generate_document_bytes(stationary_config, "PDF")
+        self.assertTrue(payload.startswith(b"%PDF-"))
+
+    def test_mobile_multi_document_invoices_export_as_zip(self) -> None:
+        raw_config = self._mobile_config("fuel_invoice")
+        raw_config["document"]["doc_count"] = 3
+        filename = build_document_download_filename(raw_config, "PDF")
+        self.assertTrue(filename.endswith(".zip"))
+
+        payload = generate_document_bytes(raw_config, "PDF")
+        with ZipFile(BytesIO(payload)) as archive:
+            names = archive.namelist()
+            self.assertEqual(len(names), 3)
+            for name in names:
+                self.assertTrue(name.endswith(".pdf"))
+                self._assert_payload_shape(archive.read(name), "PDF")
 
     def test_stationary_ground_truth_is_non_empty_for_each_document_family(self) -> None:
         cases = [
@@ -281,6 +343,56 @@ class GeneratorContractTests(unittest.TestCase):
                             "total_quantity": "8200",
                             "total_cost": "1640",
                             "tariffs": [{"name": "Day"}],
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def _mobile_config(self, document_type: str) -> dict:
+        return {
+            "_category": "mobile_combustion",
+            "random_seed": 5,
+            "financial_period": {
+                "label": "Jan 2026",
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-31",
+            },
+            "document_type": document_type,
+            "document": {
+                "language": "en",
+                "distractor_fields": {"enabled": False},
+                "vat_rate": 20,
+                "distance_unit": "km",
+                "trips_per_vehicle": 3,
+                "doc_count": 4 if document_type == "fuel_card_statement" else 1,
+            },
+            "companies": [
+                {
+                    "label": "Fleet Ops",
+                    "supplier": "Roadside Fuel Supplies",
+                    "supplier_code": "RFS",
+                    "supplier_address": ["4 Carriage Way", "Leeds"],
+                    "customer": "Acme Fleet",
+                    "customer_code": "ACF",
+                    "currency": "GBP (£)",
+                    "card_number": "CARD-9",
+                    "merchants": ["Applegreen M1"],
+                    "vehicles": [
+                        {
+                            "registration": "AB12 CDE",
+                            "make_model": "Ford Transit 350",
+                            "vehicle_type": "Van (LGV)",
+                            "fuel": "Diesel",
+                            "unit": "L",
+                            "driver": "J. Smith",
+                            "card_number": "7002 3411 XXXX 9012",
+                            "site": "London Depot",
+                            "quantity": "55",
+                            "unit_price": "1.52",
+                            "monthly_distance_km": "2600",
+                            "efficiency_l_per_100km": "9.8",
+                            "odometer_start": "42000",
                         }
                     ],
                 }

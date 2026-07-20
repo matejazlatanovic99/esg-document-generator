@@ -173,6 +173,20 @@ _ADMIN_TABULAR_FIELDS: tuple[_Template, ...] = (
 )
 
 
+_FLEET_DOCUMENT_FIELDS: tuple[_Template, ...] = (
+    _Template("fleet_group", "fleet_group", "meta", ("FG-2", "FG-5", "FG-9")),
+    _Template("cost_centre", "cost_centre", "meta", ("CC-104", "CC-228", "CC-642")),
+    _Template("dispatch_ref", "dispatch_ref", "summary", ("DSP-208", "DSP-331", "DSP-517")),
+    _Template("haulier_code", "haulier_code", "summary", ("HL-17", "HL-24", "HL-66")),
+)
+
+_FLEET_TABULAR_FIELDS: tuple[_Template, ...] = (
+    _Template("fleet_group", "fleet_group", "vehicle_reg", ("FG-2", "FG-5", "FG-9"), position="after", row_scope="statement"),
+    _Template("cost_centre", "cost_centre", "vehicle_reg", ("CC-104", "CC-228", "CC-642"), position="after", row_scope="row"),
+    _Template("dispatch_ref", "dispatch_ref", "distance", ("DSP-208", "DSP-331", "DSP-517"), position="before", row_scope="row"),
+    _Template("haulier_code", "haulier_code", "merchant", ("HL-17", "HL-24", "HL-66"), position="after", row_scope="statement"),
+)
+
 _CATALOG: dict[tuple[str, str, str], dict[str, tuple[_Template, ...]]] = {
     ("heat", "utility_bill", "PDF"): {"document": _HEAT_DOCUMENT_FIELDS},
     ("heat", "utility_bill", "DOCX"): {"document": _HEAT_DOCUMENT_FIELDS},
@@ -198,6 +212,18 @@ _CATALOG: dict[tuple[str, str, str], dict[str, tuple[_Template, ...]]] = {
     ("stationary_combustion", "bems", "DOCX"): {"document": _ADMIN_DOCUMENT_FIELDS},
     ("stationary_combustion", "bems", "CSV"): {"tabular": _ADMIN_TABULAR_FIELDS},
     ("stationary_combustion", "bems", "XLSX"): {"tabular": _ADMIN_TABULAR_FIELDS},
+    ("mobile_combustion", "fuel_invoice", "PDF"): {"document": _FLEET_DOCUMENT_FIELDS},
+    ("mobile_combustion", "fuel_invoice", "DOCX"): {"document": _FLEET_DOCUMENT_FIELDS},
+    ("mobile_combustion", "fuel_card_statement", "PDF"): {"document": _FLEET_DOCUMENT_FIELDS},
+    ("mobile_combustion", "fuel_card_statement", "DOCX"): {"document": _FLEET_DOCUMENT_FIELDS},
+    ("mobile_combustion", "fuel_card_statement", "CSV"): {"tabular": _FLEET_TABULAR_FIELDS},
+    ("mobile_combustion", "fuel_card_statement", "XLSX"): {"tabular": _FLEET_TABULAR_FIELDS},
+    ("mobile_combustion", "telematics_fuel", "CSV"): {"tabular": _FLEET_TABULAR_FIELDS},
+    ("mobile_combustion", "telematics_fuel", "XLSX"): {"tabular": _FLEET_TABULAR_FIELDS},
+    ("mobile_combustion", "telematics_trips", "CSV"): {"tabular": _FLEET_TABULAR_FIELDS},
+    ("mobile_combustion", "telematics_trips", "XLSX"): {"tabular": _FLEET_TABULAR_FIELDS},
+    ("mobile_combustion", "telematics_odometer", "CSV"): {"tabular": _FLEET_TABULAR_FIELDS},
+    ("mobile_combustion", "telematics_odometer", "XLSX"): {"tabular": _FLEET_TABULAR_FIELDS},
 }
 
 

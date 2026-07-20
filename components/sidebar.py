@@ -114,7 +114,7 @@ SCOPE_CONFIG: dict[str, dict] = {
             "Mobile Combustion": "mobile_combustion",
             "Fugitive Emissions": "fugitive_emissions",
         },
-        "implemented": {"stationary_combustion"},
+        "implemented": {"stationary_combustion", "mobile_combustion"},
     },
     "Scope 2: Indirect Energy": {
         "categories": {

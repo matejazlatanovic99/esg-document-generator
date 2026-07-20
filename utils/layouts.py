@@ -83,6 +83,27 @@ _FIELD_ALIAS_POOLS: dict[str, dict[str, list[str]]] = {
     "operating_hours": {"en": ["Operating Hours", "Run Hours", "Hours"]},
     "sensor_name": {"en": ["Sensor Name", "Sensor", "Channel"]},
     "value": {"en": ["Value", "Reading", "Measured Value"]},
+    "time": {"en": ["Time", "Transaction Time", "Time of Day"]},
+    "vehicle_reg": {"en": ["Vehicle Registration", "Registration", "Vehicle Reg", "Plate No"]},
+    "vehicle_name": {"en": ["Vehicle", "Vehicle Description", "Make / Model"]},
+    "vehicle_type": {"en": ["Vehicle Type", "Class", "Vehicle Class"]},
+    "driver": {"en": ["Driver", "Driver Name", "Operator"]},
+    "receipt_no": {"en": ["Receipt No", "Transaction No", "Receipt Ref"]},
+    "odometer": {"en": ["Odometer", "Odometer Reading", "Mileage"]},
+    "odometer_start": {"en": ["Odometer Start", "Opening Odometer", "Start Mileage"]},
+    "odometer_end": {"en": ["Odometer End", "Closing Odometer", "End Mileage"]},
+    "distance": {"en": ["Distance", "Distance Travelled", "Total Distance"]},
+    "distance_unit": {"en": ["Distance Unit", "Unit", "UoM"]},
+    "trip_id": {"en": ["Trip ID", "Journey ID", "Trip Ref"]},
+    "trip_start": {"en": ["Trip Start", "Start Time", "Departure"]},
+    "trip_end": {"en": ["Trip End", "End Time", "Arrival"]},
+    "start_location": {"en": ["Start Location", "Origin", "From"]},
+    "end_location": {"en": ["End Location", "Destination", "To"]},
+    "duration": {"en": ["Duration", "Trip Duration", "Elapsed"]},
+    "avg_speed": {"en": ["Avg Speed", "Average Speed", "Mean Speed"]},
+    "engine_hours": {"en": ["Engine Hours", "Run Hours", "Hours"]},
+    "idle_fuel": {"en": ["Idle Fuel", "Idling Fuel", "Fuel at Idle"]},
+    "avg_consumption": {"en": ["Avg Consumption", "Fuel Economy", "L/100km"]},
 }
 
 _HEAT_FIELDS = [
@@ -203,6 +224,82 @@ _BEMS_TIME_SERIES_FIELDS = [
     "value",
     "unit",
 ]
+
+_MOBILE_FUEL_CARD_FIELDS = [
+    "date",
+    "time",
+    "card_no",
+    "vehicle_reg",
+    "driver",
+    "merchant",
+    "site",
+    "receipt_no",
+    "odometer",
+    "product",
+    "qty",
+    "unit",
+    "unit_price",
+    "total",
+    "currency",
+]
+
+_MOBILE_TELEMATICS_FUEL_FIELDS = [
+    "period_start",
+    "period_end",
+    "vehicle_reg",
+    "vehicle_name",
+    "vehicle_type",
+    "fuel_type",
+    "distance",
+    "distance_unit",
+    "fuel_used",
+    "unit",
+    "idle_fuel",
+    "engine_hours",
+    "avg_consumption",
+]
+
+_MOBILE_TELEMATICS_TRIP_FIELDS = [
+    "trip_id",
+    "vehicle_reg",
+    "driver",
+    "trip_start",
+    "trip_end",
+    "start_location",
+    "end_location",
+    "distance",
+    "distance_unit",
+    "duration",
+    "avg_speed",
+    "fuel_type",
+]
+
+_MOBILE_TELEMATICS_ODOMETER_FIELDS = [
+    "period_start",
+    "period_end",
+    "vehicle_reg",
+    "vehicle_name",
+    "fuel_type",
+    "odometer_start",
+    "odometer_end",
+    "distance",
+    "distance_unit",
+]
+
+
+def _simple_tabular_spec(field_ids: list[str], *stress_orders: list[str]) -> dict[str, Any]:
+    return {
+        "field_ids": field_ids,
+        "column_orders": {
+            "default": field_ids,
+            "realistic": [field_ids],
+            "balanced": [field_ids, *stress_orders[:1]] if stress_orders else [field_ids],
+            "stress": list(stress_orders) or [field_ids],
+        },
+        "header_row_offsets": {"default": 0, "realistic": [0], "balanced": [0, 1], "stress": [0, 1, 2]},
+        "preamble_templates": {"default": ["none"], "realistic": ["none"], "balanced": ["none", "title_only"], "stress": ["none", "title_period", "audit_banner"]},
+    }
+
 
 _TABULAR_SPECS: dict[tuple[str, str, str], dict[str, Any]] = {
     ("heat", "supplier_portal_data", "CSV"): {
@@ -360,6 +457,39 @@ _TABULAR_SPECS: dict[tuple[str, str, str], dict[str, Any]] = {
         "header_row_offsets": {"default": 0, "realistic": [0], "balanced": [0, 1], "stress": [0, 1, 2]},
         "preamble_templates": {"default": ["none"], "realistic": ["none"], "balanced": ["none", "title_only"], "stress": ["none", "title_period", "audit_banner"]},
     },
+    ("mobile_combustion", "fuel_card_statement", "CSV"): _simple_tabular_spec(
+        _MOBILE_FUEL_CARD_FIELDS,
+        ["card_no", "date", "time", "merchant", "site", "vehicle_reg", "driver", "product", "qty", "unit", "unit_price", "total", "currency", "receipt_no", "odometer"],
+        ["receipt_no", "date", "time", "card_no", "vehicle_reg", "odometer", "merchant", "site", "driver", "product", "qty", "unit", "unit_price", "total", "currency"],
+    ),
+    ("mobile_combustion", "fuel_card_statement", "XLSX"): _simple_tabular_spec(
+        _MOBILE_FUEL_CARD_FIELDS,
+        ["card_no", "date", "time", "merchant", "site", "vehicle_reg", "driver", "product", "qty", "unit", "unit_price", "total", "currency", "receipt_no", "odometer"],
+    ),
+    ("mobile_combustion", "telematics_fuel", "CSV"): _simple_tabular_spec(
+        _MOBILE_TELEMATICS_FUEL_FIELDS,
+        ["vehicle_reg", "vehicle_name", "vehicle_type", "fuel_type", "period_start", "period_end", "fuel_used", "unit", "distance", "distance_unit", "idle_fuel", "engine_hours", "avg_consumption"],
+    ),
+    ("mobile_combustion", "telematics_fuel", "XLSX"): _simple_tabular_spec(
+        _MOBILE_TELEMATICS_FUEL_FIELDS,
+        ["vehicle_reg", "vehicle_name", "vehicle_type", "fuel_type", "period_start", "period_end", "fuel_used", "unit", "distance", "distance_unit", "idle_fuel", "engine_hours", "avg_consumption"],
+    ),
+    ("mobile_combustion", "telematics_trips", "CSV"): _simple_tabular_spec(
+        _MOBILE_TELEMATICS_TRIP_FIELDS,
+        ["vehicle_reg", "driver", "trip_id", "trip_start", "trip_end", "distance", "distance_unit", "duration", "avg_speed", "start_location", "end_location", "fuel_type"],
+    ),
+    ("mobile_combustion", "telematics_trips", "XLSX"): _simple_tabular_spec(
+        _MOBILE_TELEMATICS_TRIP_FIELDS,
+        ["vehicle_reg", "driver", "trip_id", "trip_start", "trip_end", "distance", "distance_unit", "duration", "avg_speed", "start_location", "end_location", "fuel_type"],
+    ),
+    ("mobile_combustion", "telematics_odometer", "CSV"): _simple_tabular_spec(
+        _MOBILE_TELEMATICS_ODOMETER_FIELDS,
+        ["vehicle_reg", "vehicle_name", "fuel_type", "odometer_start", "odometer_end", "distance", "distance_unit", "period_start", "period_end"],
+    ),
+    ("mobile_combustion", "telematics_odometer", "XLSX"): _simple_tabular_spec(
+        _MOBILE_TELEMATICS_ODOMETER_FIELDS,
+        ["vehicle_reg", "vehicle_name", "fuel_type", "odometer_start", "odometer_end", "distance", "distance_unit", "period_start", "period_end"],
+    ),
 }
 
 _DOCUMENT_SPECS: dict[tuple[str, str, str], dict[str, Any]] = {
@@ -442,6 +572,22 @@ _DOCUMENT_SPECS: dict[tuple[str, str, str], dict[str, Any]] = {
     ("stationary_combustion", "bems_time_series", "DOCX"): {
         "base_families": {"default": "report", "realistic": ["report"], "balanced": ["report"], "stress": ["report"]},
         "section_orders": {"default": ["header", "meta", "table", "footer"], "realistic": [["header", "meta", "table", "footer"]], "balanced": [["header", "table", "meta", "footer"]], "stress": [["table", "header", "meta", "footer"]]},
+    },
+    ("mobile_combustion", "fuel_invoice", "PDF"): {
+        "base_families": {"default": "classic", "realistic": ["classic"], "balanced": ["classic", "meta-first"], "stress": ["classic", "meta-first"]},
+        "section_orders": {"default": ["addresses", "meta", "line_items", "totals", "footer"], "realistic": [["addresses", "meta", "line_items", "totals", "footer"]], "balanced": [["meta", "addresses", "line_items", "totals", "footer"], ["addresses", "line_items", "meta", "totals", "footer"]], "stress": [["meta", "addresses", "totals", "line_items", "footer"]]},
+    },
+    ("mobile_combustion", "fuel_invoice", "DOCX"): {
+        "base_families": {"default": "classic", "realistic": ["classic"], "balanced": ["classic", "meta-first"], "stress": ["classic", "meta-first"]},
+        "section_orders": {"default": ["addresses", "meta", "line_items", "totals", "footer"], "realistic": [["addresses", "meta", "line_items", "totals", "footer"]], "balanced": [["meta", "addresses", "line_items", "totals", "footer"], ["addresses", "line_items", "meta", "totals", "footer"]], "stress": [["meta", "addresses", "totals", "line_items", "footer"]]},
+    },
+    ("mobile_combustion", "fuel_card_statement", "PDF"): {
+        "base_families": {"default": "statement", "realistic": ["statement"], "balanced": ["statement", "summary-first"], "stress": ["statement", "summary-first"]},
+        "section_orders": {"default": ["summary", "transactions", "footer"], "realistic": [["summary", "transactions", "footer"]], "balanced": [["summary", "transactions", "footer"], ["transactions", "summary", "footer"]], "stress": [["transactions", "summary", "footer"]]},
+    },
+    ("mobile_combustion", "fuel_card_statement", "DOCX"): {
+        "base_families": {"default": "statement", "realistic": ["statement"], "balanced": ["statement", "summary-first"], "stress": ["statement", "summary-first"]},
+        "section_orders": {"default": ["summary", "transactions", "footer"], "realistic": [["summary", "transactions", "footer"]], "balanced": [["summary", "transactions", "footer"], ["transactions", "summary", "footer"]], "stress": [["transactions", "summary", "footer"]]},
     },
 }
 

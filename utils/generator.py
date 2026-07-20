@@ -15,6 +15,7 @@ from generators import (
     docx_generator,
     electricity_generator,
     heat_steam_generator,
+    mobile_combustion_generator,
     pdf_generator,
     stationary_combustion_generator,
     xlsx_generator,
@@ -343,6 +344,8 @@ def _category_key(raw_config: dict) -> str:
         return "electricity"
     if category == "stationary_combustion":
         return "stationary_combustion"
+    if category == "mobile_combustion":
+        return "mobile_combustion"
     return "heat"
 
 
@@ -352,7 +355,7 @@ def _document_type_key(raw_config: dict) -> str:
         return str(document_type)
     if _category_key(raw_config) == "electricity":
         return "electricity_bill"
-    if _category_key(raw_config) == "stationary_combustion":
+    if _category_key(raw_config) in {"stationary_combustion", "mobile_combustion"}:
         return "fuel_invoice"
     return "utility_bill"
 
@@ -388,6 +391,7 @@ def build_document_filename_base(raw_config: dict, *, output_format: str | None 
     category_slug = {
         "electricity": "electricity",
         "stationary_combustion": "stationary",
+        "mobile_combustion": "mobile",
     }.get(_category_key(raw_config), "heat")
     fp = raw_config.get("financial_period", {})
     fp_start = _date_slug_value(fp.get("start_date") or fp.get("start"))
@@ -588,6 +592,8 @@ def generate_json_ground_truth(raw_config: dict) -> bytes:
     category = _category_key(raw_config)
     if category == "stationary_combustion":
         return stationary_combustion_generator.generate_ground_truth_json(raw_config)
+    if category == "mobile_combustion":
+        return mobile_combustion_generator.generate_ground_truth_json(raw_config)
 
     output = []
     if category == "electricity":
@@ -602,7 +608,12 @@ def generate_json_ground_truth(raw_config: dict) -> bytes:
             for section in sections:
                 company_label = section["company"].get("label", "")
                 site = section.get("site", {})
-                entry = {"company_label": company_label, "site_label": site.get("label", "")}
+                entry = {
+                    "scope": "Scope 2",
+                    "category": "electricity",
+                    "company_label": company_label,
+                    "site_label": site.get("label", ""),
+                }
                 entry.update(site)
                 output.append(entry)
     else:
@@ -611,7 +622,12 @@ def generate_json_ground_truth(raw_config: dict) -> bytes:
             company_label = section["company"].get("label", "")
             site_label = section["site"].get("label", "")
             for rec in section["records"]:
-                entry: dict = {"company_label": company_label, "site_label": site_label}
+                entry: dict = {
+                    "scope": "Scope 2",
+                    "category": "purchased_heat_steam_cooling",
+                    "company_label": company_label,
+                    "site_label": site_label,
+                }
                 entry.update(rec)
                 output.append(entry)
 
@@ -792,6 +808,54 @@ def _generate_stationary_bems_docx(raw_config: dict) -> bytes:
     return stationary_combustion_generator.generate_bems_equipment_report_docx(raw_config)
 
 
+def _generate_mobile_fuel_invoice_pdf(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_fuel_invoice_pdf(raw_config)
+
+
+def _generate_mobile_fuel_invoice_docx(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_fuel_invoice_docx(raw_config)
+
+
+def _generate_mobile_fuel_card_statement_pdf(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_fuel_card_statement_pdf(raw_config)
+
+
+def _generate_mobile_fuel_card_statement_docx(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_fuel_card_statement_docx(raw_config)
+
+
+def _generate_mobile_fuel_card_statement_xlsx(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_fuel_card_statement_xlsx(raw_config)
+
+
+def _generate_mobile_fuel_card_statement_csv(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_fuel_card_statement_csv(raw_config)
+
+
+def _generate_mobile_telematics_fuel_xlsx(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_telematics_fuel_xlsx(raw_config)
+
+
+def _generate_mobile_telematics_fuel_csv(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_telematics_fuel_csv(raw_config)
+
+
+def _generate_mobile_telematics_trips_xlsx(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_telematics_trips_xlsx(raw_config)
+
+
+def _generate_mobile_telematics_trips_csv(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_telematics_trips_csv(raw_config)
+
+
+def _generate_mobile_telematics_odometer_xlsx(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_telematics_odometer_xlsx(raw_config)
+
+
+def _generate_mobile_telematics_odometer_csv(raw_config: dict) -> bytes:
+    return mobile_combustion_generator.generate_telematics_odometer_csv(raw_config)
+
+
 _DOCUMENT_GENERATOR_DISPATCH = {
     ("heat", "utility_bill", "PDF"): _generate_heat_utility_bill_pdf,
     ("heat", "utility_bill", "DOCX"): _generate_heat_utility_bill_docx,
@@ -817,6 +881,18 @@ _DOCUMENT_GENERATOR_DISPATCH = {
     ("stationary_combustion", "bems", "DOCX"): _generate_stationary_bems_docx,
     ("stationary_combustion", "bems", "XLSX"): _generate_stationary_bems_xlsx,
     ("stationary_combustion", "bems", "CSV"): _generate_stationary_bems_csv,
+    ("mobile_combustion", "fuel_invoice", "PDF"): _generate_mobile_fuel_invoice_pdf,
+    ("mobile_combustion", "fuel_invoice", "DOCX"): _generate_mobile_fuel_invoice_docx,
+    ("mobile_combustion", "fuel_card_statement", "PDF"): _generate_mobile_fuel_card_statement_pdf,
+    ("mobile_combustion", "fuel_card_statement", "DOCX"): _generate_mobile_fuel_card_statement_docx,
+    ("mobile_combustion", "fuel_card_statement", "XLSX"): _generate_mobile_fuel_card_statement_xlsx,
+    ("mobile_combustion", "fuel_card_statement", "CSV"): _generate_mobile_fuel_card_statement_csv,
+    ("mobile_combustion", "telematics_fuel", "XLSX"): _generate_mobile_telematics_fuel_xlsx,
+    ("mobile_combustion", "telematics_fuel", "CSV"): _generate_mobile_telematics_fuel_csv,
+    ("mobile_combustion", "telematics_trips", "XLSX"): _generate_mobile_telematics_trips_xlsx,
+    ("mobile_combustion", "telematics_trips", "CSV"): _generate_mobile_telematics_trips_csv,
+    ("mobile_combustion", "telematics_odometer", "XLSX"): _generate_mobile_telematics_odometer_xlsx,
+    ("mobile_combustion", "telematics_odometer", "CSV"): _generate_mobile_telematics_odometer_csv,
 }
 
 

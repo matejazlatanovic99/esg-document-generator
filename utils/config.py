@@ -85,6 +85,21 @@ def build_raw_config_stationary(form_data: dict) -> dict:
             "bems_interval_minutes": int(form_data.get("bems_interval_minutes", 60)),
             "bems_report_type": form_data.get("bems_report_type", "equipment_trend_report"),
             "fuel_card_vat_rate": int(form_data.get("fuel_card_vat_rate", 20) or 0),
+            "cross_scope_items": bool(form_data.get("doc_cross_scope_items", False)),
+        },
+    )
+
+
+def build_raw_config_mobile(form_data: dict) -> dict:
+    """Convert mobile combustion form data into the generator config dict."""
+    return build_raw_config(
+        form_data,
+        category="mobile_combustion",
+        document_overrides={
+            "vat_rate": int(form_data.get("mobile_vat_rate", 20) or 0),
+            "distance_unit": form_data.get("mobile_distance_unit", "km"),
+            "trips_per_vehicle": int(form_data.get("mobile_trips_per_vehicle", 10) or 10),
+            "cross_scope_items": bool(form_data.get("doc_cross_scope_items", False)),
         },
     )
 
@@ -363,6 +378,92 @@ def _validate_stationary_equipment_items(
                     "Tank capacity",
                     _stationary_item_value(site, item, "tank_capacity", 0),
                 )
+
+
+_MOBILE_INVOICE_DOCUMENT_TYPES = {"fuel_invoice"}
+_MOBILE_PRICED_DOCUMENT_TYPES = {"fuel_invoice", "fuel_card_statement"}
+
+
+def validate_raw_config_mobile(raw_config: dict) -> list[str]:
+    """Validation for mobile combustion configs."""
+    errors = _validate_common_financial_period(raw_config)
+    document_type = raw_config.get("document_type", "fuel_invoice")
+
+    companies: list[dict] = raw_config.get("companies", [])
+    if not companies:
+        errors.append("At least one company is required.")
+
+    seen_registrations: set[str] = set()
+
+    for i, company in enumerate(companies):
+        prefix = f"Company {i + 1} ({company.get('label', '?')})"
+        required_company_fields = [
+            ("label", "Company label"),
+            ("supplier", "Supplier name"),
+            ("customer", "Customer name"),
+        ]
+        if document_type in _MOBILE_INVOICE_DOCUMENT_TYPES:
+            required_company_fields.append(("supplier_code", "Supplier code"))
+        if document_type_requires_company_currency("mobile_combustion", document_type):
+            required_company_fields.append(("currency", "Currency"))
+
+        for field, label in required_company_fields:
+            if not str(company.get(field, "")).strip():
+                errors.append(f"{prefix}: {label} is required.")
+
+        if document_type in _MOBILE_INVOICE_DOCUMENT_TYPES and not company.get("supplier_address"):
+            errors.append(f"{prefix}: Supplier address is required.")
+
+        vehicles: list[dict] = company.get("vehicles", [])
+        if not vehicles:
+            errors.append(f"{prefix}: At least one vehicle is required.")
+
+        for j, vehicle in enumerate(vehicles):
+            vehicle_prefix = f"{prefix} > Vehicle {j + 1} ({vehicle.get('registration', '?')})"
+
+            registration = str(vehicle.get("registration", "")).strip()
+            if not registration:
+                errors.append(f"{vehicle_prefix}: Registration is required.")
+            elif registration in seen_registrations:
+                errors.append(f"{vehicle_prefix}: Registration '{registration}' is duplicated.")
+            else:
+                seen_registrations.add(registration)
+
+            if not str(vehicle.get("fuel", "")).strip():
+                errors.append(f"{vehicle_prefix}: Fuel is required.")
+
+            if document_type in _MOBILE_PRICED_DOCUMENT_TYPES:
+                if not str(vehicle.get("unit", "")).strip():
+                    errors.append(f"{vehicle_prefix}: Unit is required.")
+                _validate_positive_float(errors, vehicle_prefix, "Quantity", vehicle.get("quantity", 0))
+                _validate_positive_float(errors, vehicle_prefix, "Unit price", vehicle.get("unit_price", 0))
+
+            if document_type == "fuel_card_statement":
+                if not str(vehicle.get("card_number", "") or company.get("card_number", "")).strip():
+                    errors.append(f"{vehicle_prefix}: Card number is required.")
+
+            if document_type in {"telematics_fuel", "telematics_odometer"}:
+                _validate_positive_float(
+                    errors, vehicle_prefix, "Monthly distance", vehicle.get("monthly_distance_km", 0)
+                )
+            if document_type == "telematics_fuel":
+                _validate_positive_float(
+                    errors, vehicle_prefix, "Fuel efficiency", vehicle.get("efficiency_l_per_100km", 0)
+                )
+            if document_type == "telematics_odometer":
+                _validate_nonnegative_float(
+                    errors, vehicle_prefix, "Odometer start", vehicle.get("odometer_start", 0)
+                )
+
+    if document_type == "telematics_trips":
+        _validate_positive_int(
+            errors,
+            "Document settings",
+            "Trips per vehicle",
+            raw_config.get("document", {}).get("trips_per_vehicle", 0),
+        )
+
+    return errors
 
 
 def validate_raw_config_stationary(raw_config: dict) -> list[str]:

@@ -63,6 +63,46 @@ DOCUMENT_TYPES: dict[str, dict[str, dict]] = {
             "company_currency_required": True,
         },
     },
+    "mobile_combustion": {
+        "fuel_invoice": {
+            "label": "Fuel Invoice",
+            "formats": ["PDF", "DOCX"],
+            "implemented": True,
+            "default_title": "Mobile Combustion Fuel Invoice",
+            "default_subject": "Scope 1 mobile combustion fuel purchase",
+            "company_currency_required": True,
+            "multi_document_formats": ["PDF", "DOCX"],
+        },
+        "fuel_card_statement": {
+            "label": "Monthly Fuel Card Statement",
+            "formats": ["PDF", "DOCX", "XLSX", "CSV"],
+            "implemented": True,
+            "default_title": "Fleet Fuel Card Statement",
+            "default_subject": "Scope 1 mobile combustion fuel card transactions",
+            "company_currency_required": True,
+        },
+        "telematics_fuel": {
+            "label": "Vehicle Telematics — Fuel Usage",
+            "formats": ["XLSX", "CSV"],
+            "implemented": True,
+            "default_title": "Telematics Fuel Usage Report",
+            "default_subject": "Scope 1 mobile combustion telematics fuel usage",
+        },
+        "telematics_trips": {
+            "label": "Vehicle Telematics — Trip History",
+            "formats": ["XLSX", "CSV"],
+            "implemented": True,
+            "default_title": "Telematics Trip History Export",
+            "default_subject": "Scope 1 mobile combustion telematics trip history",
+        },
+        "telematics_odometer": {
+            "label": "Vehicle Telematics — Mileage / Odometer Summary",
+            "formats": ["XLSX", "CSV"],
+            "implemented": True,
+            "default_title": "Fleet Mileage / Odometer Summary",
+            "default_subject": "Scope 1 mobile combustion mileage summary",
+        },
+    },
     "purchased_heat_steam_cooling": {
         "utility_bill": {
             "label": "Utility Bill",

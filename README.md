@@ -17,11 +17,28 @@ A Streamlit web application for generating ESG (Environmental, Social, Governanc
 | Scope 2: Indirect Energy | Purchased Heat / Steam / Cooling | Implemented |
 | Scope 2: Indirect Energy | Electricity | Implemented |
 | Scope 1: Direct Emissions | Stationary Combustion | Implemented |
-| Scope 1: Direct Emissions | Mobile Combustion | Coming Soon |
+| Scope 1: Direct Emissions | Mobile Combustion | Implemented |
 | Scope 1: Direct Emissions | Fugitive Emissions | Coming Soon |
-| Scope 2: Indirect Energy | Electricity | Coming Soon |
 | Scope 3: Upstream | All categories (8) | Coming Soon |
 | Scope 3: Downstream | All categories (7) | Coming Soon |
+
+### Mobile combustion document types
+
+| Document type | Formats | Notes |
+|---|---|---|
+| Fuel Invoice | PDF, DOCX | Single fuel purchase per vehicle; non-fuel lines (service/delivery fees) included as extraction distractors; multi-invoice ZIP export |
+| Monthly Fuel Card Statement | PDF, DOCX, XLSX, CSV | Per-transaction date/time, card, vehicle, merchant, receipt number (dedup), odometer |
+| Vehicle Telematics — Fuel Usage | XLSX, CSV | Per-vehicle monthly fuel consumed, distance, idle fuel, engine hours |
+| Vehicle Telematics — Trip History | XLSX, CSV | Trip-level rows for distance-based fallback |
+| Vehicle Telematics — Mileage / Odometer Summary | XLSX, CSV | Start/end odometer and total distance per vehicle |
+
+### Multi-scope documents
+
+Fuel invoices (stationary and mobile) and mobile fuel card statements support an
+**"Include line items from other scopes/categories"** option that mixes lines from the
+other Scope 1 category into the same document (e.g. heating oil on a vehicle fuel
+invoice). Ground-truth JSON tags every record with its `Scope` and `Category` so
+extraction category-filtering can be validated.
 
 ## Output formats
 

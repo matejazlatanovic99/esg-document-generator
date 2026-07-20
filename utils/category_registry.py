@@ -4,14 +4,17 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from components.electricity_form import render_electricity_form
+from components.mobile_combustion_form import render_mobile_combustion_form
 from components.purchased_heat_form import render_purchased_heat_form
 from components.stationary_combustion_form import render_stationary_combustion_form
 from utils.config import (
     build_raw_config,
     build_raw_config_electricity,
+    build_raw_config_mobile,
     build_raw_config_stationary,
     validate_raw_config,
     validate_raw_config_electricity,
+    validate_raw_config_mobile,
     validate_raw_config_stationary,
 )
 from utils.document_catalog import (
@@ -114,6 +117,14 @@ CATEGORY_WORKFLOWS: dict[str, CategoryWorkflow] = {
         filename_category_slug="stationary",
         ground_truth_builder=generate_json_ground_truth,
         document_type_slug_builder=_stationary_document_type_slug,
+    ),
+    "mobile_combustion": CategoryWorkflow(
+        key="mobile_combustion",
+        form_renderer=render_mobile_combustion_form,
+        raw_config_builder=build_raw_config_mobile,
+        validator=validate_raw_config_mobile,
+        filename_category_slug="mobile",
+        ground_truth_builder=generate_json_ground_truth,
     ),
 }
 

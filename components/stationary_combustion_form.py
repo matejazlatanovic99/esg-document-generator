@@ -254,6 +254,17 @@ def _render_document_settings(document_type: str | None) -> None:
             help="Append QA characters to generated text values.",
         )
 
+        if document_type == "fuel_invoice":
+            st.checkbox(
+                "Include line items from other scopes/categories",
+                key="doc_cross_scope_items",
+                help=(
+                    "Add a road-transport fuel line (Scope 1 mobile combustion) to each invoice so "
+                    "extraction has to separate categories. Ground-truth entries are tagged with "
+                    "their true category."
+                ),
+            )
+
         if st.session_state.get("sidebar_format", "PDF") in {"PDF", "DOCX"}:
             st.slider(
                 "Scan noise level",
@@ -1224,6 +1235,7 @@ def render_stationary_combustion_form(document_type: str | None) -> dict:
         "doc_language": _LANGUAGE_OPTIONS.get(s.get("doc_language_label", "English"), "en"),
         "doc_noise": float(s.get("doc_noise", 0.0)),
         "doc_inject_special_chars": bool(s.get("doc_inject_special_chars", False)),
+        "doc_cross_scope_items": bool(s.get("doc_cross_scope_items", False)),
         "bems_interval_minutes": int(str(s.get("stationary_bems_interval_label", "60 minutes")).split()[0]),
         "bems_report_type": _bems_report_type_value_module(_BEMS_REPORT_TYPES),
         "companies": _collect_companies(document_type),
