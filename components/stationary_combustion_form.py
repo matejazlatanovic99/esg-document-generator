@@ -1219,7 +1219,8 @@ def render_stationary_combustion_form(document_type: str | None) -> dict:
         "fuel_invoice": "stationary_invoice_doc_count",
         "fuel_card": "stationary_fuel_card_doc_count",
     }
-    doc_count = int(s.get(doc_count_keys.get(document_type, ""), 1) or 1)
+    doc_count_key = doc_count_keys.get(document_type)
+    doc_count = int(s.get(doc_count_key, 1) or 1) if doc_count_key else 1
 
     return {
         "_category": "stationary_combustion",

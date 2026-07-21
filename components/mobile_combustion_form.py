@@ -90,6 +90,7 @@ _VEHICLE_FUELS = [
     "Diesel (average biofuel blend)",
     "Petrol (average biofuel blend)",
     "CNG",
+    "LNG",
     "LPG",
     "Biodiesel HVO",
 ]
@@ -103,16 +104,17 @@ _VEHICLE_TYPES = [
     "Other",
 ]
 
-_VEHICLE_MODELS = [
-    "Ford Transit 350 L3",
-    "Toyota Corolla Hybrid Estate",
-    "Mercedes-Benz Sprinter 315",
-    "Volkswagen Caddy Cargo",
-    "Toyota Hilux Active",
-    "DAF LF 180 7.5t",
-    "Toyota Proace Verso",
-    "Skoda Octavia Estate",
+_VEHICLE_PROFILES = [
+    {"make_model": "Ford Transit 350 L3", "vehicle_type": "Van (LGV)", "fuels": ["Diesel", "Diesel (average biofuel blend)"]},
+    {"make_model": "Toyota Corolla Hybrid Estate", "vehicle_type": "Passenger car", "fuels": ["Petrol", "Petrol (average biofuel blend)"]},
+    {"make_model": "Mercedes-Benz Sprinter 315", "vehicle_type": "Van (LGV)", "fuels": ["Diesel", "Diesel (average biofuel blend)"]},
+    {"make_model": "Volkswagen Caddy Cargo", "vehicle_type": "Van (LGV)", "fuels": ["Diesel", "Petrol"]},
+    {"make_model": "Toyota Hilux Active", "vehicle_type": "Van (LGV)", "fuels": ["Diesel"]},
+    {"make_model": "DAF LF 180 7.5t", "vehicle_type": "HGV", "fuels": ["Diesel", "Diesel (average biofuel blend)"]},
+    {"make_model": "Toyota Proace Verso", "vehicle_type": "Passenger car", "fuels": ["Diesel", "Petrol"]},
+    {"make_model": "Skoda Octavia Estate", "vehicle_type": "Passenger car", "fuels": ["Diesel", "Petrol"]},
 ]
+_VEHICLE_MODELS = [profile["make_model"] for profile in _VEHICLE_PROFILES]
 
 _DRIVERS = [
     "J. Smith",
@@ -142,6 +144,8 @@ _DEPOTS = [
 ]
 
 _FUEL_UNITS = ("L", "gal")
+_MASS_FUEL_UNITS = ("kg", "t")
+_MASS_SOLD_FUELS = {"CNG", "LNG"}
 _DISTANCE_UNITS = ("km", "mi")
 
 _REG_PREFIXES = ["AB", "BD", "CE", "DK", "EF", "GH", "KL", "MN"]
@@ -327,18 +331,19 @@ def _render_defaults(document_type: str | None) -> None:
 
 def _vehicle_default(i: int, j: int, field: str):
     rng = random.Random(f"mobile_vehicle_default:{field}:{i}:{j}")
+    profile = _VEHICLE_PROFILES[(i * 2 + j) % len(_VEHICLE_PROFILES)]
     if field == "registration":
         prefix = _REG_PREFIXES[(i * 3 + j) % len(_REG_PREFIXES)]
         suffix = _REG_SUFFIXES[(i + j * 2) % len(_REG_SUFFIXES)]
         return f"{prefix}{rng.randint(10, 72)} {suffix}"
     if field == "make_model":
-        return _VEHICLE_MODELS[(i * 2 + j) % len(_VEHICLE_MODELS)]
+        return profile["make_model"]
     if field == "driver":
         return _DRIVERS[(i * 3 + j) % len(_DRIVERS)]
     if field == "vehicle_type":
-        return "Van (LGV)" if (i + j) % 2 == 0 else "Passenger car"
+        return profile["vehicle_type"]
     if field == "fuel":
-        return _VEHICLE_FUELS[0] if (i + j) % 3 else _VEHICLE_FUELS[1]
+        return rng.choice(profile["fuels"])
     if field == "card_number":
         return f"7002 34{rng.randint(10, 99)} XXXX {rng.randint(1000, 9999)}"
     if field == "site":
@@ -358,6 +363,10 @@ def _vehicle_default(i: int, j: int, field: str):
 
 def _option_index(options: tuple[str, ...] | list[str], selected) -> int:
     return options.index(selected) if selected in options else 0
+
+
+def _fuel_unit_options(fuel: str) -> tuple[str, ...]:
+    return _MASS_FUEL_UNITS if fuel in _MASS_SOLD_FUELS else _FUEL_UNITS
 
 
 def _render_vehicle(i: int, j: int, document_type: str | None) -> None:
@@ -382,7 +391,12 @@ def _render_vehicle(i: int, j: int, document_type: str | None) -> None:
         st.text_input("Driver", value=_vehicle_default(i, j, "driver"), key=f"{key}_driver", disabled=omit_driver)
     with col2:
         if document_type in {"fuel_invoice", "fuel_card_statement"}:
-            st.selectbox("Fuel Unit", options=_FUEL_UNITS, key=f"{key}_unit")
+            fuel_value = st.session_state.get(f"{key}_fuel", _vehicle_default(i, j, "fuel"))
+            unit_options = _fuel_unit_options(fuel_value)
+            unit_key = f"{key}_unit"
+            if st.session_state.get(unit_key) not in unit_options:
+                st.session_state[unit_key] = unit_options[0]
+            st.selectbox("Fuel Unit", options=unit_options, key=unit_key)
             st.number_input(
                 "Typical Fill Quantity",
                 min_value=0.0,
