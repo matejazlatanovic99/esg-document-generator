@@ -21,6 +21,7 @@ from reportlab.pdfgen import canvas
 from generators.stationary_combustion_generator import (
     _augment_stationary_field_ids as _augment_field_ids,
     _currency_symbol,
+    _draw_fitted_string,
     _draw_multiline,
     _financial_period,
     _fmt_date,
@@ -1030,20 +1031,18 @@ def _render_invoice_pdf(raw_config: dict, records: list[dict]) -> bytes:
                 c.setFillColor(accent)
                 c.rect(table_x, table_top, sum(table_widths), 22, fill=1, stroke=0)
                 c.setFillColor(colors.white)
-                c.setFont("Helvetica-Bold", 9)
                 x_cursor = table_x + 6
                 for header, width in zip(headers, table_widths):
-                    c.drawString(x_cursor, table_top + 7, header)
+                    _draw_fitted_string(c, x_cursor, table_top + 7, header, width - 8, "Helvetica-Bold", 9)
                     x_cursor += width
 
                 y_row = table_top - 24
-                c.setFont("Helvetica", 9)
                 c.setFillColor(colors.black)
                 for row in _invoice_line_rows(raw_config, record):
                     c.rect(table_x, y_row, sum(table_widths), 20, fill=0, stroke=1)
                     x_cursor = table_x + 6
                     for value, width in zip(row, table_widths):
-                        c.drawString(x_cursor, y_row + 6, str(value))
+                        _draw_fitted_string(c, x_cursor, y_row + 6, str(value), width - 8, "Helvetica", 9)
                         x_cursor += width
                     y_row -= 20
                 current_top = y_row - 14
@@ -1269,22 +1268,20 @@ def generate_fuel_card_statement_pdf(raw_config: dict) -> bytes:
                 elif section_name == "transactions":
                     table_x = 30
                     table_top = current_top - 6
-                    column_widths = [40, 26, 74, 48, 72, 56, 40, 40, 30, 20, 38, 40]
+                    column_widths = [40, 22, 78, 52, 76, 56, 38, 40, 28, 16, 38, 40]
                     header_ids = ["date", "time", "card_no", "vehicle_reg", "merchant", "receipt_no", "odometer", "product", "qty", "unit", "unit_price", "total"]
                     compact_headers = {"vehicle_reg": "Vehicle", "receipt_no": "Receipt", "product": "Fuel"}
                     c.setFillColor(accent)
                     c.rect(table_x, table_top, sum(column_widths), 22, fill=1, stroke=0)
                     c.setFillColor(colors.white)
-                    c.setFont("Helvetica-Bold", 6.8)
                     cursor = table_x + 3
                     for field_id, width in zip(header_ids, column_widths):
                         header = compact_headers.get(field_id) or _tr(raw_config, _FUEL_CARD_HEADER_KEYS.get(field_id, field_id))
-                        c.drawString(cursor, table_top + 7, header)
+                        _draw_fitted_string(c, cursor, table_top + 7, header, width - 4, "Helvetica-Bold", 6.8)
                         cursor += width
 
                     row_y = table_top - 18
                     c.setFillColor(colors.black)
-                    c.setFont("Helvetica", 6.8)
                     for transaction in transactions[page_start:page_start + page_size]:
                         row_map = _fuel_card_row_map(statement, transaction)
                         c.rect(table_x, row_y, sum(column_widths), 18, fill=0, stroke=1)
@@ -1295,7 +1292,7 @@ def generate_fuel_card_statement_pdf(raw_config: dict) -> bytes:
                                 value = f"{currency_symbol}{_fmt_money(value)}"
                             elif field_id == "qty" and not isinstance(value, str):
                                 value = _fmt_num(value)
-                            c.drawString(cursor, row_y + 5, str(value))
+                            _draw_fitted_string(c, cursor, row_y + 5, str(value), width - 4, "Helvetica", 6.8)
                             cursor += width
                         row_y -= 18
 

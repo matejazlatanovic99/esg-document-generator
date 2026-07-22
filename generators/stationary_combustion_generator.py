@@ -20,6 +20,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 
 from components.stationary_combustion.units import default_fuel_volume_unit
@@ -1755,6 +1756,39 @@ def _draw_multiline(c: canvas.Canvas, x: float, y: float, lines: list[str], lead
         c.drawString(x, y, line)
         y -= leading
     return y
+
+
+def _draw_fitted_string(
+    c: canvas.Canvas,
+    x: float,
+    y: float,
+    text: str,
+    max_width: float,
+    font_name: str,
+    font_size: float,
+    *,
+    min_font_size: float = 5.5,
+    align: str = "left",
+) -> None:
+    """Draw text within max_width, shrinking the font and finally truncating with an ellipsis
+    if it would otherwise overflow into the next column."""
+    size = font_size
+    while size > min_font_size and pdfmetrics.stringWidth(text, font_name, size) > max_width:
+        size -= 0.25
+    size = max(size, min_font_size)
+
+    if pdfmetrics.stringWidth(text, font_name, size) > max_width:
+        ellipsis = "…"
+        truncated = text
+        while truncated and pdfmetrics.stringWidth(truncated + ellipsis, font_name, size) > max_width:
+            truncated = truncated[:-1]
+        text = (truncated + ellipsis) if truncated else ellipsis
+
+    c.setFont(font_name, size)
+    if align == "right":
+        c.drawRightString(x, y, text)
+    else:
+        c.drawString(x, y, text)
 
 
 def _shade_docx_cell(cell, fill: str) -> None:
