@@ -333,6 +333,44 @@ _CROSS_SCOPE_STATIONARY_LINES = [
     {"fuel": "Kerosene", "equipment": "Site Heater"},
 ]
 
+# ── realistic fuel name synonyms (presentation-only, not ground truth) ───────
+
+_FUEL_NAME_SYNONYMS: dict[str, list[str]] = {
+    "Diesel": [
+        "Diesel", "Diesel B7", "Diesel B10", "Premium Diesel", "ULSD", "DERV",
+        "Road Diesel", "White Diesel", "Automotive Diesel", "EN590 Diesel",
+        "Bio Diesel Blend", "Diesel (average biofuel blend)", "Diesel with Bio",
+    ],
+    "Petrol": [
+        "Petrol", "Gasoline", "Regular", "Regular Unleaded", "Unleaded",
+        "Unleaded 95", "Unleaded 98", "ULP", "ULP95", "ULP98", "E5", "E10",
+        "Premium Unleaded", "Premium Petrol", "Super Unleaded",
+    ],
+    "LPG": ["LPG", "Auto LPG"],
+    "CNG": ["CNG", "Compressed Natural Gas", "BioCNG"],
+    "LNG": ["LNG", "Bio-LNG"],
+    "Biodiesel HVO": ["Biodiesel HVO", "HVO100", "HVO", "Renewable Diesel"],
+}
+_FUEL_NAME_SYNONYMS["Diesel (average biofuel blend)"] = _FUEL_NAME_SYNONYMS["Diesel"]
+_FUEL_NAME_SYNONYMS["Petrol (average biofuel blend)"] = _FUEL_NAME_SYNONYMS["Petrol"]
+
+
+def _realistic_fuel_names_enabled(raw_config: dict) -> bool:
+    return bool(_document_option(raw_config, "realistic_fuel_names", False))
+
+
+def _fuel_display(raw_config: dict, fuel: str, rng: random.Random | None = None) -> str:
+    """Presentation-only synonym swap; never used for ground truth.
+
+    Uses the unseeded global RNG (not the per-record ``rng``) so the choice
+    varies on every generation instead of being pinned to the document seed.
+    """
+    del rng
+    if not fuel or not _realistic_fuel_names_enabled(raw_config):
+        return fuel
+    options = _FUEL_NAME_SYNONYMS.get(fuel)
+    return random.choice(options) if options else fuel
+
 _TRIP_LOCATIONS = [
     "London Depot",
     "Manchester DC",
@@ -373,6 +411,7 @@ def _build_invoice_base_records(raw_config: dict) -> list[dict]:
             "vehicle_name": _with_special_chars(raw_config, vehicle.get("make_model", "")),
             "driver": "" if vehicle_omit.get("driver", False) else _with_special_chars(raw_config, vehicle.get("driver", "")),
             "fuel": _with_special_chars(raw_config, vehicle.get("fuel", "Diesel")),
+            "fuel_raw": vehicle.get("fuel", "Diesel"),
             "unit": vehicle.get("unit", "L"),
             "quantity": quantity,
             "unit_price": unit_price,
@@ -439,10 +478,11 @@ def _build_invoice_records(raw_config: dict) -> list[dict]:
             record["unit_price"] = _q2(Decimal(str(round(rng.uniform(1.35, 1.75), 2))))
 
         fuel_amount = _q2(record["quantity"] * record["unit_price"])
+        fuel_display = _with_special_chars(raw_config, _fuel_display(raw_config, record["fuel_raw"], rng))
         lines: list[dict] = [{
             "kind": "fuel",
             "category": CATEGORY_MOBILE,
-            "description": record["fuel"],
+            "description": fuel_display,
             "fuel": record["fuel"],
             "vehicle_reg": record["vehicle_reg"],
             "quantity": record["quantity"],
@@ -542,6 +582,7 @@ def _build_fuel_card_statements(raw_config: dict) -> list[dict]:
                 "merchant": _with_special_chars(raw_config, rng.choice(company.get("merchants") or [company.get("merchant") or "Motorway Services"])),
                 "site": _with_special_chars(raw_config, vehicle.get("site", "")),
                 "fuel": _with_special_chars(raw_config, vehicle.get("fuel", "Diesel")),
+                "fuel_display": _with_special_chars(raw_config, _fuel_display(raw_config, vehicle.get("fuel", "Diesel"), rng)),
                 "quantity": quantity,
                 "unit": vehicle.get("unit", "L"),
                 "unit_price": unit_price,
@@ -618,6 +659,7 @@ def _build_telematics_fuel_rows(raw_config: dict) -> list[dict]:
                 "vehicle_name": _with_special_chars(raw_config, vehicle.get("make_model", "")),
                 "vehicle_type": vehicle.get("vehicle_type", ""),
                 "fuel": "" if vehicle_omit.get("fuel", False) else _with_special_chars(raw_config, vehicle.get("fuel", "Diesel")),
+                "fuel_display": "" if vehicle_omit.get("fuel", False) else _with_special_chars(raw_config, _fuel_display(raw_config, vehicle.get("fuel", "Diesel"), rng)),
                 "distance": round(distance, 1),
                 "distance_unit": distance_unit,
                 "fuel_used": round(fuel_used, 2),
@@ -673,6 +715,7 @@ def _build_trip_rows(raw_config: dict) -> list[dict]:
                 "duration": f"{duration_minutes // 60:02d}:{duration_minutes % 60:02d}",
                 "avg_speed": round(avg_speed_kmh * km_factor, 1),
                 "fuel": "" if vehicle_omit.get("fuel", False) else _with_special_chars(raw_config, vehicle.get("fuel", "Diesel")),
+                "fuel_display": "" if vehicle_omit.get("fuel", False) else _with_special_chars(raw_config, _fuel_display(raw_config, vehicle.get("fuel", "Diesel"), rng)),
             })
 
     rows.sort(key=lambda row: (row["vehicle_reg"], row["trip_start"]))
@@ -701,6 +744,7 @@ def _build_odometer_rows(raw_config: dict) -> list[dict]:
             "vehicle_reg": _with_special_chars(raw_config, vehicle.get("registration", "")),
             "vehicle_name": _with_special_chars(raw_config, vehicle.get("make_model", "")),
             "fuel": "" if vehicle_omit.get("fuel", False) else _with_special_chars(raw_config, vehicle.get("fuel", "Diesel")),
+            "fuel_display": "" if vehicle_omit.get("fuel", False) else _with_special_chars(raw_config, _fuel_display(raw_config, vehicle.get("fuel", "Diesel"), rng)),
             "odometer_start": round(odometer_start_km * km_factor),
             "odometer_end": round(odometer_end_km * km_factor),
             "distance": round(distance_km * km_factor, 1),
@@ -1205,7 +1249,7 @@ def _fuel_card_row_map(statement: dict, transaction: dict) -> dict[str, Any]:
         "site": transaction["site"],
         "receipt_no": transaction["receipt_no"],
         "odometer": transaction["odometer"],
-        "product": transaction["fuel"],
+        "product": transaction.get("fuel_display", transaction["fuel"]),
         "qty": _number(transaction["quantity"]),
         "unit": transaction["unit"],
         "unit_price": _number(transaction["unit_price"]),
@@ -1565,7 +1609,7 @@ def _telematics_fuel_row_map(row: dict) -> dict[str, Any]:
         "vehicle_reg": row["vehicle_reg"],
         "vehicle_name": row["vehicle_name"],
         "vehicle_type": row["vehicle_type"],
-        "fuel_type": row["fuel"],
+        "fuel_type": row.get("fuel_display", row["fuel"]),
         "distance": _number(row["distance"]),
         "distance_unit": row["distance_unit"],
         "fuel_used": _number(row["fuel_used"]),
@@ -1589,7 +1633,7 @@ def _telematics_trip_row_map(row: dict) -> dict[str, Any]:
         "distance_unit": row["distance_unit"],
         "duration": row["duration"],
         "avg_speed": _number(row["avg_speed"]),
-        "fuel_type": row["fuel"],
+        "fuel_type": row.get("fuel_display", row["fuel"]),
     }
 
 
@@ -1599,7 +1643,7 @@ def _telematics_odometer_row_map(row: dict) -> dict[str, Any]:
         "period_end": _iso(row["period_end"]),
         "vehicle_reg": row["vehicle_reg"],
         "vehicle_name": row["vehicle_name"],
-        "fuel_type": row["fuel"],
+        "fuel_type": row.get("fuel_display", row["fuel"]),
         "odometer_start": _number(row["odometer_start"]),
         "odometer_end": _number(row["odometer_end"]),
         "distance": _number(row["distance"]),

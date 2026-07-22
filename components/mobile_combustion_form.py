@@ -214,6 +214,15 @@ def _render_document_settings(document_type: str | None) -> None:
             key="doc_inject_special_chars",
             help="Append QA characters to generated text values.",
         )
+        st.checkbox(
+            "Use realistic fuel names",
+            key="doc_realistic_fuel_names",
+            help=(
+                "Render fuel names using randomized real-world naming variations "
+                "(e.g. ULSD, DERV, Premium Unleaded) instead of the exact selected "
+                "value. The underlying fuel type used for ground truth is unchanged."
+            ),
+        )
 
         if document_type in {"fuel_invoice", "fuel_card_statement"}:
             st.checkbox(
@@ -603,6 +612,7 @@ def render_mobile_combustion_form(document_type: str | None) -> dict:
         "mobile_distance_unit": s.get("mobile_distance_unit", "km"),
         "mobile_trips_per_vehicle": int(s.get("mobile_trips_per_vehicle", 10) or 10),
         "doc_cross_scope_items": bool(s.get("doc_cross_scope_items", False)),
+        "doc_realistic_fuel_names": bool(s.get("doc_realistic_fuel_names", False)),
         "doc_title": s.get("doc_title", default_title),
         "doc_subject": s.get("doc_subject", default_subject),
         "doc_seed": int(s.get("doc_seed", 20260415)),

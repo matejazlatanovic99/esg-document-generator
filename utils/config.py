@@ -100,6 +100,7 @@ def build_raw_config_mobile(form_data: dict) -> dict:
             "distance_unit": form_data.get("mobile_distance_unit", "km"),
             "trips_per_vehicle": int(form_data.get("mobile_trips_per_vehicle", 10) or 10),
             "cross_scope_items": bool(form_data.get("doc_cross_scope_items", False)),
+            "realistic_fuel_names": bool(form_data.get("doc_realistic_fuel_names", False)),
         },
     )
 
