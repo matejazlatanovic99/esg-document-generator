@@ -84,6 +84,8 @@ _TELEMATICS_PROVIDERS = [
     },
 ]
 
+_DEFAULT_CUSTOMER_ADDRESS = "1 Kings Road\nLondon SW1A 1AA\nUnited Kingdom"
+
 _VEHICLE_FUELS = [
     "Diesel",
     "Petrol",
@@ -268,8 +270,8 @@ def _render_financial_period() -> None:
     with col3:
         st.date_input("End Date", key="fp_end")
 
-    fp_start: date = st.session_state.get("fp_start", date(2026, 1, 1))
-    fp_end: date = st.session_state.get("fp_end", date(2026, 1, 31))
+    fp_start: date = st.session_state.get("fp_start") or date(2026, 1, 1)
+    fp_end: date = st.session_state.get("fp_end") or date(2026, 1, 31)
     if fp_end < fp_start:
         st.error("End date must be after start date.")
         return
@@ -482,6 +484,13 @@ def _render_companies(document_type: str | None) -> None:
             with col2:
                 st.text_input("Customer Name", value="Toyota Financial Services UK", key=f"mobile_co_{i}_customer")
                 st.text_input("Customer Code", value=f"TFS{i + 1}", key=f"mobile_co_{i}_customer_code")
+                if document_type in {"fuel_invoice", "fuel_card_statement"}:
+                    st.text_area(
+                        "Customer Address",
+                        value=_DEFAULT_CUSTOMER_ADDRESS,
+                        key=f"mobile_co_{i}_customer_address",
+                        height=90,
+                    )
                 st.text_input(
                     "Account Number",
                     value="",
@@ -560,6 +569,11 @@ def _collect_companies(document_type: str | None) -> list[dict]:
             ],
             "customer": s.get(f"mobile_co_{i}_customer", ""),
             "customer_code": s.get(f"mobile_co_{i}_customer_code", ""),
+            "customer_address": [
+                line
+                for line in s.get(f"mobile_co_{i}_customer_address", "").split("\n")
+                if line.strip()
+            ],
             "account_number": s.get(f"mobile_co_{i}_account_number", ""),
             "currency": (
                 s.get(f"mobile_co_{i}_currency", "GBP (£)")
@@ -593,8 +607,8 @@ def render_mobile_combustion_form(document_type: str | None) -> dict:
     _render_companies(document_type)
 
     s = st.session_state
-    fp_start: date = s.get("fp_start", date(2026, 1, 1))
-    fp_end: date = s.get("fp_end", date(2026, 1, 31))
+    fp_start: date = s.get("fp_start") or date(2026, 1, 1)
+    fp_end: date = s.get("fp_end") or date(2026, 1, 31)
     default_title, default_subject = _document_defaults(document_type)
 
     doc_count_keys = {

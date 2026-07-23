@@ -174,6 +174,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "fuel_invoice_footer": "Generated for Scope 1 mobile combustion. Vehicle details are illustrative.",
         "fuel_card_title": "Fuel Card Statement",
         "account_name": "Account Name",
+        "address": "Address",
         "provider": "Provider",
         "statement_no": "Statement No",
         "statement_period": "Statement Period",
@@ -194,6 +195,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "telematics_fuel_title": "Telematics Fuel Usage Report",
         "telematics_trips_title": "Telematics Trip History Export",
         "telematics_odometer_title": "Fleet Mileage / Odometer Summary",
+        "customer": "Customer",
         "reporting_period": "Reporting Period",
         "period_start": "Period Start",
         "period_end": "Period End",
@@ -405,6 +407,9 @@ def _build_invoice_base_records(raw_config: dict) -> list[dict]:
             ],
             "customer": _with_special_chars(raw_config, company.get("customer", "")),
             "customer_code": company.get("customer_code", ""),
+            "customer_address": [
+                _with_special_chars(raw_config, line) for line in company.get("customer_address", [])
+            ],
             "account_number": _account_number(company, seed, company_index),
             "site": "" if vehicle_omit.get("site", False) else _with_special_chars(raw_config, vehicle.get("site", "")),
             "vehicle_reg": _with_special_chars(raw_config, vehicle.get("registration", "")),
@@ -598,6 +603,9 @@ def _build_fuel_card_statements(raw_config: dict) -> list[dict]:
         statements.append({
             "company": _with_special_chars(raw_config, company.get("label", "")),
             "account_name": _with_special_chars(raw_config, company.get("customer") or company.get("label", "")),
+            "customer_address": [
+                _with_special_chars(raw_config, line) for line in company.get("customer_address", [])
+            ],
             "provider": _with_special_chars(raw_config, company.get("supplier", "")),
             "account_number": _account_number(company, seed, company_index),
             "statement_no": f"ST-{fp['end_date'].strftime('%Y%m')}-{statement_rng.randint(1000, 9999)}",
@@ -1049,7 +1057,7 @@ def _render_invoice_pdf(raw_config: dict, records: list[dict]) -> bytes:
                 c.setFont("Helvetica-Bold", 11)
                 c.drawString(48, current_top, _tr(raw_config, "bill_to"))
                 c.setFont("Helvetica", 10)
-                current_top = _draw_multiline(c, 48, current_top - 16, [record["customer"]]) - 18
+                current_top = _draw_multiline(c, 48, current_top - 16, [record["customer"], *record["customer_address"]]) - 18
             elif section_name == "meta":
                 c.setFillColor(colors.black)
                 c.setFont("Helvetica-Bold", 11)
@@ -1149,7 +1157,7 @@ def _render_invoice_docx(raw_config: dict, records: list[dict]) -> bytes:
                 _shade_docx_cell(cell, "E4EFEA")
                 _set_docx_cell_text(cell, heading, bold=True)
             _set_docx_cell_text(addresses.cell(1, 0), "\n".join(record["supplier_address"]))
-            _set_docx_cell_text(addresses.cell(1, 1), record["customer"])
+            _set_docx_cell_text(addresses.cell(1, 1), "\n".join([record["customer"], *record["customer_address"]]))
             document.add_paragraph()
 
         def render_meta() -> None:
@@ -1259,8 +1267,14 @@ def _fuel_card_row_map(statement: dict, transaction: dict) -> dict[str, Any]:
 
 
 def _fuel_card_meta_lines(raw_config: dict, statement: dict, distractor_plan) -> list[str]:
+    address_lines = (
+        [f"{_tr(raw_config, 'address')}: {', '.join(statement['customer_address'])}"]
+        if statement["customer_address"]
+        else []
+    )
     return [
         f"{_tr(raw_config, 'account_name')}: {statement['account_name']}",
+        *address_lines,
         f"{_tr(raw_config, 'account_no')}: {statement['account_number']}",
         f"{_tr(raw_config, 'provider')}: {statement['provider']}",
         f"{_tr(raw_config, 'statement_no')}: {statement['statement_no']}",
@@ -1461,18 +1475,29 @@ def generate_fuel_card_statement_xlsx(raw_config: dict) -> bytes:
         sheet = workbook.create_sheet(title=(statement["company"] or f"Account {index}")[:31])
         sheet["A1"] = _tr(raw_config, "fuel_card_title")
         sheet["A1"].font = Font(size=14, bold=True)
-        sheet["A2"] = _tr(raw_config, "account_name")
-        sheet["B2"] = statement["account_name"]
-        sheet["A3"] = _tr(raw_config, "account_no")
-        sheet["B3"] = statement["account_number"]
-        sheet["A4"] = _tr(raw_config, "statement_no")
-        sheet["B4"] = statement["statement_no"]
-        sheet["A5"] = _tr(raw_config, "statement_period")
-        sheet["B5"] = f"{statement['period_start'].isoformat()} to {statement['period_end'].isoformat()}"
-        sheet["A6"] = _tr(raw_config, "currency")
-        sheet["B6"] = statement["currency"]
 
-        header_row = _write_xlsx_preamble(sheet, 7, layout_plan)
+        row_cursor = 2
+        sheet[f"A{row_cursor}"] = _tr(raw_config, "account_name")
+        sheet[f"B{row_cursor}"] = statement["account_name"]
+        row_cursor += 1
+        if statement["customer_address"]:
+            sheet[f"A{row_cursor}"] = _tr(raw_config, "address")
+            sheet[f"B{row_cursor}"] = ", ".join(statement["customer_address"])
+            row_cursor += 1
+        sheet[f"A{row_cursor}"] = _tr(raw_config, "account_no")
+        sheet[f"B{row_cursor}"] = statement["account_number"]
+        row_cursor += 1
+        sheet[f"A{row_cursor}"] = _tr(raw_config, "statement_no")
+        sheet[f"B{row_cursor}"] = statement["statement_no"]
+        row_cursor += 1
+        sheet[f"A{row_cursor}"] = _tr(raw_config, "statement_period")
+        sheet[f"B{row_cursor}"] = f"{statement['period_start'].isoformat()} to {statement['period_end'].isoformat()}"
+        row_cursor += 1
+        sheet[f"A{row_cursor}"] = _tr(raw_config, "currency")
+        sheet[f"B{row_cursor}"] = statement["currency"]
+        row_cursor += 1
+
+        header_row = _write_xlsx_preamble(sheet, row_cursor + 1, layout_plan)
         header_fill = PatternFill(fill_type="solid", fgColor="245C4F")
         for column_index, field_id in enumerate(ordered_ids, start=1):
             cell = sheet.cell(
@@ -1527,6 +1552,8 @@ def generate_fuel_card_statement_csv(raw_config: dict) -> bytes:
             writer.writerow([])
         writer.writerow([_tr(raw_config, "fuel_card_title")])
         writer.writerow([_tr(raw_config, "account_name"), statement["account_name"]])
+        if statement["customer_address"]:
+            writer.writerow([_tr(raw_config, "address"), ", ".join(statement["customer_address"])])
         writer.writerow([_tr(raw_config, "account_no"), statement["account_number"]])
         writer.writerow([_tr(raw_config, "statement_no"), statement["statement_no"]])
         writer.writerow([_tr(raw_config, "statement_period"), f"{statement['period_start'].isoformat()} to {statement['period_end'].isoformat()}"])
@@ -1659,6 +1686,17 @@ def _telematics_title_key(raw_config: dict) -> str:
     }.get(_document_type(raw_config), "telematics_fuel_title")
 
 
+def _telematics_customer_label(raw_config: dict) -> str:
+    names: list[str] = []
+    seen: set[str] = set()
+    for company in raw_config.get("companies", []):
+        name = _with_special_chars(raw_config, company.get("customer", ""))
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return ", ".join(names)
+
+
 def _render_telematics_csv(
     raw_config: dict,
     rows: list[dict],
@@ -1675,6 +1713,9 @@ def _render_telematics_csv(
     buffer = StringIO()
     writer = csv.writer(buffer)
     writer.writerow([_tr(raw_config, _telematics_title_key(raw_config))])
+    customer_label = _telematics_customer_label(raw_config)
+    if customer_label:
+        writer.writerow([_tr(raw_config, "customer"), customer_label])
     writer.writerow([_tr(raw_config, "reporting_period"), f"{fp['start_date'].isoformat()} to {fp['end_date'].isoformat()}"])
     writer.writerow([_tr(raw_config, "generated"), fp["end_date"].isoformat()])
     writer.writerow([])
@@ -1716,10 +1757,18 @@ def _render_telematics_xlsx(
     sheet.title = sheet_title[:31]
     sheet["A1"] = _tr(raw_config, _telematics_title_key(raw_config))
     sheet["A1"].font = Font(size=14, bold=True)
-    sheet["A2"] = _tr(raw_config, "reporting_period")
-    sheet["B2"] = f"{fp['start_date'].isoformat()} to {fp['end_date'].isoformat()}"
 
-    header_row = _write_xlsx_preamble(sheet, 4, layout_plan)
+    row_cursor = 2
+    customer_label = _telematics_customer_label(raw_config)
+    if customer_label:
+        sheet[f"A{row_cursor}"] = _tr(raw_config, "customer")
+        sheet[f"B{row_cursor}"] = customer_label
+        row_cursor += 1
+    sheet[f"A{row_cursor}"] = _tr(raw_config, "reporting_period")
+    sheet[f"B{row_cursor}"] = f"{fp['start_date'].isoformat()} to {fp['end_date'].isoformat()}"
+    row_cursor += 1
+
+    header_row = _write_xlsx_preamble(sheet, row_cursor + 1, layout_plan)
     header_fill = PatternFill(fill_type="solid", fgColor="245C4F")
     for column_index, field_id in enumerate(ordered_ids, start=1):
         cell = sheet.cell(
