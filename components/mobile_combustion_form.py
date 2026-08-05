@@ -330,12 +330,12 @@ def _render_defaults(document_type: str | None) -> None:
         with col2:
             if document_type == "telematics_trips":
                 st.number_input(
-                    "Trips per vehicle",
+                    "Log entries per vehicle",
                     min_value=1,
                     max_value=200,
                     step=1,
                     key="mobile_trips_per_vehicle",
-                    help="Number of trip rows generated per vehicle across the reporting period.",
+                    help="Number of mileage-log rows generated per vehicle across the reporting period.",
                 )
     st.divider()
 
@@ -427,8 +427,11 @@ def _render_vehicle(i: int, j: int, document_type: str | None) -> None:
         if document_type == "fuel_card_statement":
             st.text_input("Card Number", value=_vehicle_default(i, j, "card_number"), key=f"{key}_card_number")
         if document_type in {"telematics_fuel", "telematics_trips", "telematics_odometer"}:
+            distance_label = (
+                "Typical Monthly Distance (km)" if document_type == "telematics_trips" else "Monthly Distance (km)"
+            )
             st.number_input(
-                "Monthly Distance (km)",
+                distance_label,
                 min_value=0.0,
                 step=100.0,
                 format="%.0f",
@@ -594,9 +597,9 @@ def render_mobile_combustion_form(document_type: str | None) -> dict:
     captions = {
         "fuel_invoice": "Single fuel purchase invoice / receipt for a fleet vehicle.",
         "fuel_card_statement": "Monthly fuel card statement with per-transaction detail.",
-        "telematics_fuel": "Telematics fuel-usage report — the preferred fuel-based source.",
-        "telematics_trips": "Trip-level telematics export — distance-based fallback.",
-        "telematics_odometer": "Odometer / mileage summary — distance-based fallback.",
+        "telematics_fuel": "Vehicle telematics fuel-usage report — the preferred fuel-based source.",
+        "telematics_trips": "Trip-level vehicle mileage log — per-trip distance-based fallback.",
+        "telematics_odometer": "Odometer report — start/end mileage summary, distance-based fallback.",
     }
     st.caption(captions.get(document_type, "Mobile combustion document configuration."))
 

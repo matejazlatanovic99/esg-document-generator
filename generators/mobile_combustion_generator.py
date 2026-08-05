@@ -118,15 +118,14 @@ _TELEMATICS_FUEL_FIELD_TYPES: dict[str, str] = {
 }
 
 _TELEMATICS_TRIP_FIELD_TYPES: dict[str, str] = {
-    "trip_id": FTYPE_IDENTIFIER,
     "vehicle_reg": FTYPE_IDENTIFIER,
     "driver": FTYPE_TEXT,
     "trip_start": FTYPE_DATE_TIME,
     "trip_end": FTYPE_DATE_TIME,
+    "purpose": FTYPE_TEXT,
     "start_location": FTYPE_TEXT,
     "end_location": FTYPE_TEXT,
     "distance": FTYPE_NUMERIC,
-    "avg_speed": FTYPE_NUMERIC,
     "fuel": FTYPE_TEXT,
     "distance_unit": FTYPE_CURRENCY_UNIT,
 }
@@ -192,9 +191,9 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "account_details": "Account Details",
         "statement_details": "Statement Details",
         "fuel_card_footer": "Statement generated for mobile combustion fuel-card QA.",
-        "telematics_fuel_title": "Telematics Fuel Usage Report",
-        "telematics_trips_title": "Telematics Trip History Export",
-        "telematics_odometer_title": "Fleet Mileage / Odometer Summary",
+        "telematics_fuel_title": "Vehicle Telematics Report",
+        "telematics_trips_title": "Vehicle Mileage Log",
+        "telematics_odometer_title": "Odometer Report",
         "customer": "Customer",
         "reporting_period": "Reporting Period",
         "period_start": "Period Start",
@@ -209,17 +208,15 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "idle_fuel": "Idle Fuel",
         "engine_hours": "Engine Hours",
         "avg_consumption": "Avg Consumption",
-        "trip_id": "Trip ID",
         "trip_start": "Trip Start",
         "trip_end": "Trip End",
         "start_location": "Start Location",
         "end_location": "End Location",
-        "duration": "Duration",
-        "avg_speed": "Avg Speed",
         "odometer_start": "Odometer Start",
         "odometer_end": "Odometer End",
         "fleet": "Fleet",
         "generated": "Generated",
+        "purpose": "Purpose",
         "telematics_footer": "Telematics export generated for Scope 1 mobile combustion QA.",
         "equipment_ref": "Equipment",
     },
@@ -689,41 +686,52 @@ def _trips_per_vehicle(raw_config: dict) -> int:
 
 
 def _build_trip_rows(raw_config: dict) -> list[dict]:
+    """Trip-level mileage log rows: one row per logged trip per vehicle, with
+    trip start/end timestamps (distance-based fallback, no odometer readings —
+    those belong to the separate odometer-summary report)."""
     fp = _financial_period(raw_config)
     seed = int(raw_config.get("random_seed", 42))
     days_in_period = max((fp["end_date"] - fp["start_date"]).days, 0)
     distance_unit = _distance_unit(raw_config)
     km_factor = 0.621371 if distance_unit == "mi" else 1.0
-    trips_per_vehicle = _trips_per_vehicle(raw_config)
+    entries_per_vehicle = _trips_per_vehicle(raw_config)
     rows: list[dict] = []
 
     for company_index, vehicle_index, company, vehicle in _iter_company_vehicles(raw_config):
         vehicle_omit = vehicle.get("_omit", {})
-        for trip_index in range(trips_per_vehicle):
-            rng = random.Random(f"{seed}:telematics_trip:{company_index}:{vehicle_index}:{trip_index}")
-            trip_date = fp["start_date"] + timedelta(days=rng.randint(0, days_in_period))
-            start_dt = datetime.combine(trip_date, time(hour=rng.randint(5, 18), minute=rng.randint(0, 59)))
-            distance_km = rng.uniform(8.0, 320.0)
-            avg_speed_kmh = rng.uniform(28.0, 88.0)
-            duration_minutes = max(int(distance_km / avg_speed_kmh * 60), 4)
-            end_dt = start_dt + timedelta(minutes=duration_minutes)
-            start_location, end_location = rng.sample(_TRIP_LOCATIONS, 2)
+        vehicle_rng = random.Random(f"{seed}:telematics_trip:{company_index}:{vehicle_index}")
+        total_distance_km = _monthly_distance(vehicle, vehicle_rng) * days_in_period / 30.0
+
+        entries = []
+        for entry_index in range(entries_per_vehicle):
+            entry_rng = random.Random(f"{seed}:telematics_trip:{company_index}:{vehicle_index}:{entry_index}")
+            entry_date = fp["start_date"] + timedelta(days=entry_rng.randint(0, days_in_period))
+            entries.append((entry_date, entry_index, entry_rng))
+        entries.sort(key=lambda item: item[0])
+
+        for entry_date, entry_index, entry_rng in entries:
+            start_location, end_location = entry_rng.sample(_TRIP_LOCATIONS, 2)
+            entry_distance_km = max(total_distance_km / entries_per_vehicle * entry_rng.uniform(0.6, 1.4), 2.0)
+            trip_start = datetime.combine(entry_date, time(hour=entry_rng.randint(6, 19), minute=entry_rng.randint(0, 59)))
+            avg_speed_kmh = entry_rng.uniform(28.0, 75.0)
+            duration_minutes = max(int(entry_distance_km / avg_speed_kmh * 60), 4)
+            trip_end = trip_start + timedelta(minutes=duration_minutes)
+            purpose = "Business" if entry_rng.random() < 0.85 else "Personal"
 
             rows.append({
                 "company": _with_special_chars(raw_config, company.get("label", "")),
-                "trip_id": f"TRP-{trip_date.strftime('%Y%m%d')}-{rng.randint(1000, 9999)}",
                 "vehicle_reg": _with_special_chars(raw_config, vehicle.get("registration", "")),
                 "driver": "" if vehicle_omit.get("driver", False) else _with_special_chars(raw_config, vehicle.get("driver", "")),
-                "trip_start": start_dt,
-                "trip_end": end_dt,
+                "trip_start": trip_start,
+                "trip_end": trip_end,
+                "purpose": purpose,
                 "start_location": start_location,
                 "end_location": end_location,
-                "distance": round(distance_km * km_factor, 1),
+                "distance": round(entry_distance_km * km_factor, 1),
                 "distance_unit": distance_unit,
-                "duration": f"{duration_minutes // 60:02d}:{duration_minutes % 60:02d}",
-                "avg_speed": round(avg_speed_kmh * km_factor, 1),
                 "fuel": "" if vehicle_omit.get("fuel", False) else _with_special_chars(raw_config, vehicle.get("fuel", "Diesel")),
-                "fuel_display": "" if vehicle_omit.get("fuel", False) else _with_special_chars(raw_config, _fuel_display(raw_config, vehicle.get("fuel", "Diesel"), rng)),
+                "fuel_display": "" if vehicle_omit.get("fuel", False) else _with_special_chars(raw_config, _fuel_display(raw_config, vehicle.get("fuel", "Diesel"), entry_rng)),
+                "_seq": f"{company_index}:{vehicle_index}:{entry_index}",
             })
 
     rows.sort(key=lambda row: (row["vehicle_reg"], row["trip_start"]))
@@ -921,9 +929,9 @@ def _ground_truth_entries(raw_config: dict) -> list[dict]:
                 "Category": CATEGORY_MOBILE,
                 "Company": row["company"],
                 "Vehicle": row["vehicle_reg"],
-                "Trip ID": row["trip_id"],
                 "Trip start": _iso(row["trip_start"]),
                 "Trip end": _iso(row["trip_end"]),
+                "Purpose": row["purpose"],
                 "Start location": row["start_location"],
                 "End location": row["end_location"],
                 "Distance": _number(row["distance"]),
@@ -1602,17 +1610,15 @@ _TELEMATICS_FUEL_HEADER_KEYS: dict[str, str] = {
 }
 
 _TELEMATICS_TRIP_HEADER_KEYS: dict[str, str] = {
-    "trip_id": "trip_id",
     "vehicle_reg": "vehicle_reg",
     "driver": "driver",
     "trip_start": "trip_start",
     "trip_end": "trip_end",
+    "purpose": "purpose",
     "start_location": "start_location",
     "end_location": "end_location",
     "distance": "distance",
     "distance_unit": "distance_unit",
-    "duration": "duration",
-    "avg_speed": "avg_speed",
     "fuel_type": "fuel_type",
 }
 
@@ -1649,17 +1655,15 @@ def _telematics_fuel_row_map(row: dict) -> dict[str, Any]:
 
 def _telematics_trip_row_map(row: dict) -> dict[str, Any]:
     return {
-        "trip_id": row["trip_id"],
         "vehicle_reg": row["vehicle_reg"],
         "driver": row["driver"],
         "trip_start": row["trip_start"].strftime("%Y-%m-%d %H:%M") if hasattr(row["trip_start"], "strftime") else row["trip_start"],
         "trip_end": row["trip_end"].strftime("%Y-%m-%d %H:%M") if hasattr(row["trip_end"], "strftime") else row["trip_end"],
+        "purpose": row["purpose"],
         "start_location": row["start_location"],
         "end_location": row["end_location"],
         "distance": _number(row["distance"]),
         "distance_unit": row["distance_unit"],
-        "duration": row["duration"],
-        "avg_speed": _number(row["avg_speed"]),
         "fuel_type": row.get("fuel_display", row["fuel"]),
     }
 
@@ -1806,7 +1810,7 @@ def _telematics_fuel_row_key(row: dict) -> str:
 
 
 def _telematics_trip_row_key(row: dict) -> str:
-    return f"{row['vehicle_reg']}:{row['trip_id']}"
+    return f"{row['vehicle_reg']}:{_iso(row['trip_start'])}:{row['_seq']}"
 
 
 def _telematics_odometer_row_key(row: dict) -> str:
@@ -1830,7 +1834,7 @@ def generate_telematics_fuel_xlsx(raw_config: dict) -> bytes:
         _TELEMATICS_FUEL_HEADER_KEYS,
         _telematics_fuel_row_map,
         _telematics_fuel_row_key,
-        "Fuel Usage",
+        "Vehicle Telematics",
     )
 
 
@@ -1851,7 +1855,7 @@ def generate_telematics_trips_xlsx(raw_config: dict) -> bytes:
         _TELEMATICS_TRIP_HEADER_KEYS,
         _telematics_trip_row_map,
         _telematics_trip_row_key,
-        "Trip History",
+        "Mileage Log",
     )
 
 
@@ -1872,5 +1876,5 @@ def generate_telematics_odometer_xlsx(raw_config: dict) -> bytes:
         _TELEMATICS_ODOMETER_HEADER_KEYS,
         _telematics_odometer_row_map,
         _telematics_odometer_row_key,
-        "Mileage Summary",
+        "Odometer Report",
     )

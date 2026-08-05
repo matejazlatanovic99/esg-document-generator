@@ -94,13 +94,11 @@ _FIELD_ALIAS_POOLS: dict[str, dict[str, list[str]]] = {
     "odometer_end": {"en": ["Odometer End", "Closing Odometer", "End Mileage"]},
     "distance": {"en": ["Distance", "Distance Travelled", "Total Distance"]},
     "distance_unit": {"en": ["Distance Unit", "Unit", "UoM"]},
-    "trip_id": {"en": ["Trip ID", "Journey ID", "Trip Ref"]},
     "trip_start": {"en": ["Trip Start", "Start Time", "Departure"]},
     "trip_end": {"en": ["Trip End", "End Time", "Arrival"]},
     "start_location": {"en": ["Start Location", "Origin", "From"]},
     "end_location": {"en": ["End Location", "Destination", "To"]},
-    "duration": {"en": ["Duration", "Trip Duration", "Elapsed"]},
-    "avg_speed": {"en": ["Avg Speed", "Average Speed", "Mean Speed"]},
+    "purpose": {"en": ["Purpose", "Trip Purpose", "Journey Type"]},
     "engine_hours": {"en": ["Engine Hours", "Run Hours", "Hours"]},
     "idle_fuel": {"en": ["Idle Fuel", "Idling Fuel", "Fuel at Idle"]},
     "avg_consumption": {"en": ["Avg Consumption", "Fuel Economy", "L/100km"]},
@@ -260,17 +258,15 @@ _MOBILE_TELEMATICS_FUEL_FIELDS = [
 ]
 
 _MOBILE_TELEMATICS_TRIP_FIELDS = [
-    "trip_id",
     "vehicle_reg",
     "driver",
     "trip_start",
     "trip_end",
+    "purpose",
     "start_location",
     "end_location",
     "distance",
     "distance_unit",
-    "duration",
-    "avg_speed",
     "fuel_type",
 ]
 
@@ -476,11 +472,11 @@ _TABULAR_SPECS: dict[tuple[str, str, str], dict[str, Any]] = {
     ),
     ("mobile_combustion", "telematics_trips", "CSV"): _simple_tabular_spec(
         _MOBILE_TELEMATICS_TRIP_FIELDS,
-        ["vehicle_reg", "driver", "trip_id", "trip_start", "trip_end", "distance", "distance_unit", "duration", "avg_speed", "start_location", "end_location", "fuel_type"],
+        ["vehicle_reg", "driver", "trip_start", "trip_end", "purpose", "start_location", "end_location", "distance", "distance_unit", "fuel_type"],
     ),
     ("mobile_combustion", "telematics_trips", "XLSX"): _simple_tabular_spec(
         _MOBILE_TELEMATICS_TRIP_FIELDS,
-        ["vehicle_reg", "driver", "trip_id", "trip_start", "trip_end", "distance", "distance_unit", "duration", "avg_speed", "start_location", "end_location", "fuel_type"],
+        ["vehicle_reg", "driver", "trip_start", "trip_end", "purpose", "start_location", "end_location", "distance", "distance_unit", "fuel_type"],
     ),
     ("mobile_combustion", "telematics_odometer", "CSV"): _simple_tabular_spec(
         _MOBILE_TELEMATICS_ODOMETER_FIELDS,

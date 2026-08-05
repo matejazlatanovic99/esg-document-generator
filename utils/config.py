@@ -443,7 +443,7 @@ def validate_raw_config_mobile(raw_config: dict) -> list[str]:
                 if not str(vehicle.get("card_number", "") or company.get("card_number", "")).strip():
                     errors.append(f"{vehicle_prefix}: Card number is required.")
 
-            if document_type in {"telematics_fuel", "telematics_odometer"}:
+            if document_type in {"telematics_fuel", "telematics_odometer", "telematics_trips"}:
                 _validate_positive_float(
                     errors, vehicle_prefix, "Monthly distance", vehicle.get("monthly_distance_km", 0)
                 )

@@ -27,10 +27,10 @@ A Streamlit web application for generating ESG (Environmental, Social, Governanc
 | Document type | Formats | Notes |
 |---|---|---|
 | Fuel Invoice | PDF, DOCX | Single fuel purchase per vehicle; non-fuel lines (service/delivery fees) included as extraction distractors; multi-invoice ZIP export |
-| Monthly Fuel Card Statement | PDF, DOCX, XLSX, CSV | Per-transaction date/time, card, vehicle, merchant, receipt number (dedup), odometer |
-| Vehicle Telematics — Fuel Usage | XLSX, CSV | Per-vehicle monthly fuel consumed, distance, idle fuel, engine hours |
-| Vehicle Telematics — Trip History | XLSX, CSV | Trip-level rows for distance-based fallback |
-| Vehicle Telematics — Mileage / Odometer Summary | XLSX, CSV | Start/end odometer and total distance per vehicle |
+| Fuel Card Statement | PDF, DOCX, XLSX, CSV | Per-transaction date/time, card, vehicle, merchant, receipt number (dedup), odometer |
+| Vehicle Telematics | XLSX, CSV | Per-vehicle monthly fuel consumed, distance, idle fuel, engine hours |
+| MileageLog | XLSX, CSV | Trip-level log: trip start/end time, purpose, start/end location, distance, fuel type |
+| Odometer Report | XLSX, CSV | Start/end odometer and total distance per vehicle |
 
 ### Multi-scope documents
 

@@ -360,12 +360,23 @@ def _document_type_key(raw_config: dict) -> str:
     return "utility_bill"
 
 
+_MOBILE_FILENAME_SLUGS: dict[str, str] = {
+    "fuel_invoice": "fuel_card_statement_invoice",
+    "fuel_card_statement": "fuel_card_statement",
+    "telematics_fuel": "vehicle_telematics",
+    "telematics_trips": "mileage_log",
+    "telematics_odometer": "odometer_report",
+}
+
+
 def _document_slug_for_filename(raw_config: dict) -> str:
     document_type = _document_type_key(raw_config)
     if _category_key(raw_config) == "stationary_combustion" and document_type == "bems":
         report_type = raw_config.get("document", {}).get("bems_report_type")
         if report_type:
             return f"bems_{report_type}"
+    if _category_key(raw_config) == "mobile_combustion":
+        return _MOBILE_FILENAME_SLUGS.get(document_type, document_type)
     return document_type
 
 
