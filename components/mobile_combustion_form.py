@@ -487,7 +487,13 @@ def _render_companies(document_type: str | None) -> None:
             with col2:
                 st.text_input("Customer Name", value="Toyota Financial Services UK", key=f"mobile_co_{i}_customer")
                 st.text_input("Customer Code", value=f"TFS{i + 1}", key=f"mobile_co_{i}_customer_code")
-                if document_type in {"fuel_invoice", "fuel_card_statement"}:
+                if document_type in {
+                    "fuel_invoice",
+                    "fuel_card_statement",
+                    "telematics_fuel",
+                    "telematics_trips",
+                    "telematics_odometer",
+                }:
                     st.text_area(
                         "Customer Address",
                         value=_DEFAULT_CUSTOMER_ADDRESS,

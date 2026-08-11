@@ -195,6 +195,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "telematics_trips_title": "Vehicle Mileage Log",
         "telematics_odometer_title": "Odometer Report",
         "customer": "Customer",
+        "company": "Company",
         "reporting_period": "Reporting Period",
         "period_start": "Period Start",
         "period_end": "Period End",
@@ -658,6 +659,11 @@ def _build_telematics_fuel_rows(raw_config: dict) -> list[dict]:
 
             rows.append({
                 "company": _with_special_chars(raw_config, company.get("label", "")),
+                "company_index": company_index,
+                "customer": _with_special_chars(raw_config, company.get("customer", "")),
+                "customer_address": [
+                    _with_special_chars(raw_config, line) for line in company.get("customer_address", [])
+                ],
                 "period_start": month_start,
                 "period_end": month_end,
                 "vehicle_reg": _with_special_chars(raw_config, vehicle.get("registration", "")),
@@ -720,6 +726,11 @@ def _build_trip_rows(raw_config: dict) -> list[dict]:
 
             rows.append({
                 "company": _with_special_chars(raw_config, company.get("label", "")),
+                "company_index": company_index,
+                "customer": _with_special_chars(raw_config, company.get("customer", "")),
+                "customer_address": [
+                    _with_special_chars(raw_config, line) for line in company.get("customer_address", [])
+                ],
                 "vehicle_reg": _with_special_chars(raw_config, vehicle.get("registration", "")),
                 "driver": "" if vehicle_omit.get("driver", False) else _with_special_chars(raw_config, vehicle.get("driver", "")),
                 "trip_start": trip_start,
@@ -755,6 +766,11 @@ def _build_odometer_rows(raw_config: dict) -> list[dict]:
 
         rows.append({
             "company": _with_special_chars(raw_config, company.get("label", "")),
+            "company_index": company_index,
+            "customer": _with_special_chars(raw_config, company.get("customer", "")),
+            "customer_address": [
+                _with_special_chars(raw_config, line) for line in company.get("customer_address", [])
+            ],
             "period_start": fp["start_date"],
             "period_end": fp["end_date"],
             "vehicle_reg": _with_special_chars(raw_config, vehicle.get("registration", "")),
@@ -1635,6 +1651,14 @@ _TELEMATICS_ODOMETER_HEADER_KEYS: dict[str, str] = {
 }
 
 
+def _telematics_row_extra_map(row: dict) -> dict[str, Any]:
+    return {
+        "company": row["company"],
+        "customer": row["customer"],
+        "customer_address": ", ".join(row["customer_address"]),
+    }
+
+
 def _telematics_fuel_row_map(row: dict) -> dict[str, Any]:
     return {
         "period_start": _iso(row["period_start"]),
@@ -1650,6 +1674,7 @@ def _telematics_fuel_row_map(row: dict) -> dict[str, Any]:
         "idle_fuel": _number(row["idle_fuel"]),
         "engine_hours": _number(row["engine_hours"]),
         "avg_consumption": _number(row["avg_consumption"]),
+        **_telematics_row_extra_map(row),
     }
 
 
@@ -1665,6 +1690,7 @@ def _telematics_trip_row_map(row: dict) -> dict[str, Any]:
         "distance": _number(row["distance"]),
         "distance_unit": row["distance_unit"],
         "fuel_type": row.get("fuel_display", row["fuel"]),
+        **_telematics_row_extra_map(row),
     }
 
 
@@ -1679,6 +1705,7 @@ def _telematics_odometer_row_map(row: dict) -> dict[str, Any]:
         "odometer_end": _number(row["odometer_end"]),
         "distance": _number(row["distance"]),
         "distance_unit": row["distance_unit"],
+        **_telematics_row_extra_map(row),
     }
 
 
@@ -1688,17 +1715,6 @@ def _telematics_title_key(raw_config: dict) -> str:
         "telematics_trips": "telematics_trips_title",
         "telematics_odometer": "telematics_odometer_title",
     }.get(_document_type(raw_config), "telematics_fuel_title")
-
-
-def _telematics_customer_label(raw_config: dict) -> str:
-    names: list[str] = []
-    seen: set[str] = set()
-    for company in raw_config.get("companies", []):
-        name = _with_special_chars(raw_config, company.get("customer", ""))
-        if name and name not in seen:
-            seen.add(name)
-            names.append(name)
-    return ", ".join(names)
 
 
 def _render_telematics_csv(
@@ -1712,20 +1728,18 @@ def _render_telematics_csv(
     layout_plan = _layout_plan(raw_config, "CSV")
     distractor_plan = _distractor_plan(raw_config, "CSV")
     distractor_fields = _distractor_field_map(distractor_plan)
-    ordered_ids = _augment_field_ids(_ordered_field_ids(layout_plan, list(header_keys)), distractor_plan)
+    csv_header_keys = {**header_keys, "company": "company", "customer": "customer", "customer_address": "address"}
+    ordered_ids = _augment_field_ids(_ordered_field_ids(layout_plan, list(csv_header_keys)), distractor_plan)
 
     buffer = StringIO()
     writer = csv.writer(buffer)
     writer.writerow([_tr(raw_config, _telematics_title_key(raw_config))])
-    customer_label = _telematics_customer_label(raw_config)
-    if customer_label:
-        writer.writerow([_tr(raw_config, "customer"), customer_label])
     writer.writerow([_tr(raw_config, "reporting_period"), f"{fp['start_date'].isoformat()} to {fp['end_date'].isoformat()}"])
     writer.writerow([_tr(raw_config, "generated"), fp["end_date"].isoformat()])
     writer.writerow([])
     _write_csv_preamble(writer, layout_plan)
     writer.writerow([
-        _header_text(raw_config, layout_plan, field_id, header_keys.get(field_id, field_id), distractor_fields)
+        _header_text(raw_config, layout_plan, field_id, csv_header_keys.get(field_id, field_id), distractor_fields)
         for field_id in ordered_ids
     ])
     for row in rows:
@@ -1748,7 +1762,6 @@ def _render_telematics_xlsx(
     header_keys: dict[str, str],
     row_map_builder,
     row_key_builder,
-    sheet_title: str,
 ) -> bytes:
     fp = _financial_period(raw_config)
     layout_plan = _layout_plan(raw_config, "XLSX")
@@ -1757,48 +1770,57 @@ def _render_telematics_xlsx(
     ordered_ids = _augment_field_ids(_ordered_field_ids(layout_plan, list(header_keys)), distractor_plan)
 
     workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    sheet.title = sheet_title[:31]
-    sheet["A1"] = _tr(raw_config, _telematics_title_key(raw_config))
-    sheet["A1"].font = Font(size=14, bold=True)
+    workbook.remove(workbook.active)
 
-    row_cursor = 2
-    customer_label = _telematics_customer_label(raw_config)
-    if customer_label:
-        sheet[f"A{row_cursor}"] = _tr(raw_config, "customer")
-        sheet[f"B{row_cursor}"] = customer_label
+    for company_index, company in enumerate(raw_config.get("companies", []), start=1):
+        sheet = workbook.create_sheet(title=(company.get("label", "") or f"Company {company_index}")[:31])
+        sheet["A1"] = _tr(raw_config, _telematics_title_key(raw_config))
+        sheet["A1"].font = Font(size=14, bold=True)
+
+        row_cursor = 2
+        customer = _with_special_chars(raw_config, company.get("customer", ""))
+        if customer:
+            sheet[f"A{row_cursor}"] = _tr(raw_config, "customer")
+            sheet[f"B{row_cursor}"] = customer
+            row_cursor += 1
+        address = [_with_special_chars(raw_config, line) for line in company.get("customer_address", [])]
+        if address:
+            sheet[f"A{row_cursor}"] = _tr(raw_config, "address")
+            sheet[f"B{row_cursor}"] = ", ".join(address)
+            row_cursor += 1
+        sheet[f"A{row_cursor}"] = _tr(raw_config, "reporting_period")
+        sheet[f"B{row_cursor}"] = f"{fp['start_date'].isoformat()} to {fp['end_date'].isoformat()}"
         row_cursor += 1
-    sheet[f"A{row_cursor}"] = _tr(raw_config, "reporting_period")
-    sheet[f"B{row_cursor}"] = f"{fp['start_date'].isoformat()} to {fp['end_date'].isoformat()}"
-    row_cursor += 1
 
-    header_row = _write_xlsx_preamble(sheet, row_cursor + 1, layout_plan)
-    header_fill = PatternFill(fill_type="solid", fgColor="245C4F")
-    for column_index, field_id in enumerate(ordered_ids, start=1):
-        cell = sheet.cell(
-            row=header_row,
-            column=column_index,
-            value=_header_text(raw_config, layout_plan, field_id, header_keys.get(field_id, field_id), distractor_fields),
-        )
-        cell.font = Font(color="FFFFFF", bold=True)
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center")
+        header_row = _write_xlsx_preamble(sheet, row_cursor + 1, layout_plan)
+        header_fill = PatternFill(fill_type="solid", fgColor="245C4F")
+        for column_index, field_id in enumerate(ordered_ids, start=1):
+            cell = sheet.cell(
+                row=header_row,
+                column=column_index,
+                value=_header_text(raw_config, layout_plan, field_id, header_keys.get(field_id, field_id), distractor_fields),
+            )
+            cell.font = Font(color="FFFFFF", bold=True)
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center")
 
-    row_index = header_row + 1
-    for row in rows:
-        values = _row_values(
-            row_map_builder(row),
-            ordered_ids,
-            distractor_plan,
-            row_key=row_key_builder(row),
-            statement_key=str(row.get("company", "")),
-        )
-        for column_index, value in enumerate(values, start=1):
-            sheet.cell(row=row_index, column=column_index, value=value)
-        row_index += 1
+        row_index = header_row + 1
+        for row in rows:
+            if row.get("company_index") != company_index:
+                continue
+            values = _row_values(
+                row_map_builder(row),
+                ordered_ids,
+                distractor_plan,
+                row_key=row_key_builder(row),
+                statement_key=str(row.get("company", "")),
+            )
+            for column_index, value in enumerate(values, start=1):
+                sheet.cell(row=row_index, column=column_index, value=value)
+            row_index += 1
 
-    for column_index in range(1, len(ordered_ids) + 1):
-        sheet.column_dimensions[get_column_letter(column_index)].width = 17
+        for column_index in range(1, len(ordered_ids) + 1):
+            sheet.column_dimensions[get_column_letter(column_index)].width = 17
 
     output = BytesIO()
     workbook.save(output)
@@ -1834,7 +1856,6 @@ def generate_telematics_fuel_xlsx(raw_config: dict) -> bytes:
         _TELEMATICS_FUEL_HEADER_KEYS,
         _telematics_fuel_row_map,
         _telematics_fuel_row_key,
-        "Vehicle Telematics",
     )
 
 
@@ -1855,7 +1876,6 @@ def generate_telematics_trips_xlsx(raw_config: dict) -> bytes:
         _TELEMATICS_TRIP_HEADER_KEYS,
         _telematics_trip_row_map,
         _telematics_trip_row_key,
-        "Mileage Log",
     )
 
 
@@ -1876,5 +1896,4 @@ def generate_telematics_odometer_xlsx(raw_config: dict) -> bytes:
         _TELEMATICS_ODOMETER_HEADER_KEYS,
         _telematics_odometer_row_map,
         _telematics_odometer_row_key,
-        "Odometer Report",
     )
