@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from utils.document_catalog import document_type_requires_company_currency
@@ -101,6 +102,18 @@ def build_raw_config_mobile(form_data: dict) -> dict:
             "trips_per_vehicle": int(form_data.get("mobile_trips_per_vehicle", 10) or 10),
             "cross_scope_items": bool(form_data.get("doc_cross_scope_items", False)),
             "realistic_fuel_names": bool(form_data.get("doc_realistic_fuel_names", False)),
+        },
+    )
+
+
+def build_raw_config_waste(form_data: dict) -> dict:
+    """Convert waste-in-operations form data into the generator config dict."""
+    return build_raw_config(
+        form_data,
+        category="waste_generated_in_operations",
+        document_overrides={
+            "vat_rate": int(form_data.get("waste_vat_rate", 20) or 0),
+            "waste": dict(form_data.get("waste_options") or {}),
         },
     )
 
@@ -629,5 +642,65 @@ def validate_raw_config_stationary(raw_config: dict) -> list[str]:
                 )
                 if not site_omit.get("country", False) and not str(site.get("country", "")).strip():
                     errors.append(f"{site_prefix}: Country is required unless omitted.")
+
+    return errors
+
+
+_EWC_PATTERN = re.compile(r"^\d{2} \d{2} \d{2}\*?$")
+
+
+def validate_raw_config_waste(raw_config: dict) -> list[str]:
+    """Validation for Scope 3 Category 5 waste configs."""
+    from generators.waste_reference import EWC_CODES, STREAM_PRESETS
+
+    errors = _validate_common_financial_period(raw_config)
+    document_type = raw_config.get("document_type", "waste_contractor_invoice")
+    companies: list[dict] = raw_config.get("companies", [])
+    if not companies:
+        errors.append("At least one producer organisation is required.")
+
+    any_hazardous = False
+    for i, company in enumerate(companies):
+        prefix = f"Organisation {i + 1} ({company.get('label', '?')})"
+        if not str(company.get("name", "")).strip():
+            errors.append(f"{prefix}: Organisation name is required.")
+        if document_type_requires_company_currency("waste_generated_in_operations", document_type) and not str(company.get("currency", "")).strip():
+            errors.append(f"{prefix}: Currency is required.")
+        contractor = company.get("contractor") or {}
+        if not str(contractor.get("name", "")).strip():
+            errors.append(f"{prefix}: Waste contractor name is required.")
+        if not str(contractor.get("carrier_reg", "")).strip():
+            errors.append(f"{prefix}: Waste carrier registration number is required.")
+        sites = company.get("sites", [])
+        if not sites:
+            errors.append(f"{prefix}: At least one site is required.")
+        for j, site in enumerate(sites):
+            site_prefix = f"{prefix} > Site {j + 1} ({site.get('label', '?')})"
+            if not str(site.get("label", "")).strip():
+                errors.append(f"{site_prefix}: Site label is required.")
+            if not site.get("address"):
+                errors.append(f"{site_prefix}: Site address is required.")
+            streams = site.get("streams", [])
+            if not streams:
+                errors.append(f"{site_prefix}: Select at least one waste stream.")
+            for stream in streams:
+                preset = STREAM_PRESETS.get(stream.get("preset", ""))
+                if preset is None:
+                    errors.append(f"{site_prefix}: Unknown waste stream '{stream.get('preset')}'.")
+                    continue
+                if not _EWC_PATTERN.match(preset["ewc"]) or preset["ewc"] not in EWC_CODES:
+                    errors.append(f"{site_prefix}: Stream '{preset['label']}' has an invalid EWC code.")
+                any_hazardous = any_hazardous or preset["ewc"].endswith("*")
+                _validate_positive_int(errors, site_prefix, f"Lifts per month ({preset['label']})", stream.get("lifts_per_month", 0))
+
+    if document_type == "hazardous_waste_consignment_note" and companies and not any_hazardous:
+        errors.append("Hazardous waste consignment notes need at least one hazardous stream (EWC code with *) on a site.")
+
+    try:
+        fill = float((raw_config.get("document", {}).get("waste") or {}).get("fill_factor", 1.0))
+        if not 0 < fill <= 1:
+            errors.append("Fill factor must be between 0 and 1.")
+    except (TypeError, ValueError):
+        errors.append("Fill factor must be a number.")
 
     return errors

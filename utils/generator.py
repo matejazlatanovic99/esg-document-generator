@@ -18,6 +18,7 @@ from generators import (
     mobile_combustion_generator,
     pdf_generator,
     stationary_combustion_generator,
+    waste_generator,
     xlsx_generator,
 )
 from utils.bad_data import (
@@ -346,6 +347,8 @@ def _category_key(raw_config: dict) -> str:
         return "stationary_combustion"
     if category == "mobile_combustion":
         return "mobile_combustion"
+    if category == "waste_generated_in_operations":
+        return "waste_generated_in_operations"
     return "heat"
 
 
@@ -357,6 +360,8 @@ def _document_type_key(raw_config: dict) -> str:
         return "electricity_bill"
     if _category_key(raw_config) in {"stationary_combustion", "mobile_combustion"}:
         return "fuel_invoice"
+    if _category_key(raw_config) == "waste_generated_in_operations":
+        return "waste_contractor_invoice"
     return "utility_bill"
 
 
@@ -403,6 +408,7 @@ def build_document_filename_base(raw_config: dict, *, output_format: str | None 
         "electricity": "electricity",
         "stationary_combustion": "stationary",
         "mobile_combustion": "mobile",
+        "waste_generated_in_operations": "waste",
     }.get(_category_key(raw_config), "heat")
     fp = raw_config.get("financial_period", {})
     fp_start = _date_slug_value(fp.get("start_date") or fp.get("start"))
@@ -605,6 +611,8 @@ def generate_json_ground_truth(raw_config: dict) -> bytes:
         return stationary_combustion_generator.generate_ground_truth_json(raw_config)
     if category == "mobile_combustion":
         return mobile_combustion_generator.generate_ground_truth_json(raw_config)
+    if category == "waste_generated_in_operations":
+        return waste_generator.generate_ground_truth_json(raw_config)
 
     output = []
     if category == "electricity":
@@ -867,6 +875,25 @@ def _generate_mobile_telematics_odometer_csv(raw_config: dict) -> bytes:
     return mobile_combustion_generator.generate_telematics_odometer_csv(raw_config)
 
 
+_WASTE_FORMAT_GENERATORS = {
+    "PDF": waste_generator.generate_pdf,
+    "DOCX": waste_generator.generate_docx,
+    "XLSX": waste_generator.generate_xlsx,
+    "CSV": waste_generator.generate_csv,
+}
+
+
+def _waste_dispatch_entries() -> dict:
+    from utils.document_catalog import get_document_type_options
+
+    return {
+        ("waste_generated_in_operations", document_type, output_format): _WASTE_FORMAT_GENERATORS[output_format]
+        for document_type, config in get_document_type_options("waste_generated_in_operations").items()
+        if config.get("implemented", False)
+        for output_format in config.get("formats", [])
+    }
+
+
 _DOCUMENT_GENERATOR_DISPATCH = {
     ("heat", "utility_bill", "PDF"): _generate_heat_utility_bill_pdf,
     ("heat", "utility_bill", "DOCX"): _generate_heat_utility_bill_docx,
@@ -904,6 +931,7 @@ _DOCUMENT_GENERATOR_DISPATCH = {
     ("mobile_combustion", "telematics_trips", "CSV"): _generate_mobile_telematics_trips_csv,
     ("mobile_combustion", "telematics_odometer", "XLSX"): _generate_mobile_telematics_odometer_xlsx,
     ("mobile_combustion", "telematics_odometer", "CSV"): _generate_mobile_telematics_odometer_csv,
+    **_waste_dispatch_entries(),
 }
 
 

@@ -7,15 +7,18 @@ from components.electricity_form import render_electricity_form
 from components.mobile_combustion_form import render_mobile_combustion_form
 from components.purchased_heat_form import render_purchased_heat_form
 from components.stationary_combustion_form import render_stationary_combustion_form
+from components.waste_form import render_waste_form
 from utils.config import (
     build_raw_config,
     build_raw_config_electricity,
     build_raw_config_mobile,
     build_raw_config_stationary,
+    build_raw_config_waste,
     validate_raw_config,
     validate_raw_config_electricity,
     validate_raw_config_mobile,
     validate_raw_config_stationary,
+    validate_raw_config_waste,
 )
 from utils.document_catalog import (
     supports_monthly_zip_export,
@@ -124,6 +127,14 @@ CATEGORY_WORKFLOWS: dict[str, CategoryWorkflow] = {
         raw_config_builder=build_raw_config_mobile,
         validator=validate_raw_config_mobile,
         filename_category_slug="mobile",
+        ground_truth_builder=generate_json_ground_truth,
+    ),
+    "waste_generated_in_operations": CategoryWorkflow(
+        key="waste_generated_in_operations",
+        form_renderer=render_waste_form,
+        raw_config_builder=build_raw_config_waste,
+        validator=validate_raw_config_waste,
+        filename_category_slug="waste",
         ground_truth_builder=generate_json_ground_truth,
     ),
 }

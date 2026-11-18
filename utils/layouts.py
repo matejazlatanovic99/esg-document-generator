@@ -488,7 +488,23 @@ _TABULAR_SPECS: dict[tuple[str, str, str], dict[str, Any]] = {
     ),
 }
 
+_WASTE_REPORT_FIELDS = ["stream", "ewc", "container", "lifts", "tonnes", "pct_open_loop", "pct_combustion", "pct_anaerobic_digestion", "pct_landfill", "primary_route", "site"]
+_WASTE_LOG_FIELDS = ["date", "ref", "size", "type", "ewc", "qty", "unit", "contractor", "notes"]
+_WASTE_LOG_STRESS = ["type", "date", "size", "qty", "unit", "ewc", "ref", "notes", "contractor"]
+_WASTE_REPORT_STRESS = ["site", "ewc", "stream", "tonnes", "lifts", "container", "primary_route", "pct_landfill", "pct_combustion", "pct_anaerobic_digestion", "pct_open_loop"]
+
+for _fmt in ("CSV", "XLSX"):
+    _TABULAR_SPECS[("waste_generated_in_operations", "waste_report", _fmt)] = _simple_tabular_spec(_WASTE_REPORT_FIELDS, _WASTE_REPORT_STRESS)
+    _TABULAR_SPECS[("waste_generated_in_operations", "waste_spreadsheet", _fmt)] = _simple_tabular_spec(_WASTE_LOG_FIELDS, _WASTE_LOG_STRESS)
+
+_WASTE_INVOICE_DOCUMENT_SPEC = {
+    "base_families": {"default": "classic", "realistic": ["classic"], "balanced": ["classic", "meta-first"], "stress": ["classic", "meta-first"]},
+    "section_orders": {"default": ["addresses", "meta", "line_items", "totals", "footer"], "realistic": [["addresses", "meta", "line_items", "totals", "footer"]], "balanced": [["meta", "addresses", "line_items", "totals", "footer"], ["addresses", "line_items", "meta", "totals", "footer"]], "stress": [["meta", "addresses", "totals", "line_items", "footer"]]},
+}
+
 _DOCUMENT_SPECS: dict[tuple[str, str, str], dict[str, Any]] = {
+    ("waste_generated_in_operations", "waste_contractor_invoice", "PDF"): _WASTE_INVOICE_DOCUMENT_SPEC,
+    ("waste_generated_in_operations", "waste_contractor_invoice", "DOCX"): _WASTE_INVOICE_DOCUMENT_SPEC,
     ("heat", "utility_bill", "PDF"): {
         "base_families": {"default": "classic", "realistic": ["classic"], "balanced": ["classic", "stacked-meta"], "stress": ["classic", "stacked-meta", "charges-first"]},
         "section_orders": {

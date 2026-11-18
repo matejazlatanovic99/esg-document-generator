@@ -28,7 +28,17 @@ _CATEGORY_DISPATCH_KEY = {
     "electricity": "electricity",
     "stationary_combustion": "stationary_combustion",
     "mobile_combustion": "mobile_combustion",
+    "waste_generated_in_operations": "waste_generated_in_operations",
 }
+
+_WASTE_CASES = [
+    ("waste_transfer_note", ["PDF", "DOCX"]),
+    ("waste_contractor_invoice", ["PDF", "DOCX"]),
+    ("weighbridge_ticket", ["PDF", "DOCX"]),
+    ("waste_report", ["PDF", "XLSX", "CSV"]),
+    ("hazardous_waste_consignment_note", ["PDF", "DOCX"]),
+    ("waste_spreadsheet", ["XLSX", "CSV"]),
+]
 
 
 class GeneratorContractTests(unittest.TestCase):
@@ -95,6 +105,11 @@ class GeneratorContractTests(unittest.TestCase):
             ("mobile telematics trips csv", self._mobile_config("telematics_trips"), "CSV"),
             ("mobile telematics odometer xlsx", self._mobile_config("telematics_odometer"), "XLSX"),
             ("mobile telematics odometer csv", self._mobile_config("telematics_odometer"), "CSV"),
+            *[
+                (f"waste {document_type} {output_format.lower()}", self._waste_config(document_type), output_format)
+                for document_type, formats in _WASTE_CASES
+                for output_format in formats
+            ],
         ]
 
         for label, raw_config, output_format in cases:
@@ -214,6 +229,85 @@ class GeneratorContractTests(unittest.TestCase):
             for name in names:
                 self.assertTrue(name.endswith(".pdf"))
                 self._assert_payload_shape(archive.read(name), "PDF")
+
+    def test_waste_ground_truth_is_per_document_and_category_tagged(self) -> None:
+        for document_type, _ in _WASTE_CASES:
+            with self.subTest(document_type=document_type):
+                documents = json.loads(generate_json_ground_truth(self._waste_config(document_type)).decode("utf-8"))
+                self.assertTrue(documents)
+                for document in documents:
+                    self.assertEqual("Scope 3", document["Scope"])
+                    self.assertEqual("waste_generated_in_operations", document["Category"])
+                    self.assertEqual(document_type, document["documentType"])
+                    self.assertTrue(document["lines"])
+
+    def test_waste_special_cases_drive_ground_truth(self) -> None:
+        def waste_lines(document_type: str, **options) -> list[dict]:
+            documents = json.loads(generate_json_ground_truth(self._waste_config(document_type, **options)).decode("utf-8"))
+            return [line for document in documents for line in document["lines"]]
+
+        skip_lines = [
+            line for line in waste_lines("waste_contractor_invoice", inv_basis="unweighed")
+            if line.get("ewcCode") == "17 09 04"
+        ]
+        self.assertTrue(skip_lines)
+        for line in skip_lines:
+            self.assertEqual("volume_converted", line["quantityBasis"])
+            self.assertAlmostEqual(8 * 0.764555 * 0.32, line["quantityTonnes"], places=3)
+            self.assertIn("volume_converted", line["expectedFlags"])
+
+        credit = [line for line in waste_lines("waste_contractor_invoice", inv_role="credit_note") if line["lineKind"] == "waste"]
+        self.assertTrue(credit)
+        self.assertTrue(all(line["quantityTonnes"] < 0 and "negative_quantity" in line["expectedFlags"] for line in credit))
+
+        rebates = [line for line in waste_lines("waste_contractor_invoice", inv_rebate=True) if line["lineKind"] == "rebate"]
+        self.assertTrue(rebates)
+        self.assertTrue(all(line["cost"] < 0 < line["quantityTonnes"] for line in rebates))
+
+        no_waste = json.loads(generate_json_ground_truth(
+            self._waste_config("waste_contractor_invoice", inv_no_waste_lines=True)).decode("utf-8"))
+        self.assertIn("no_waste_lines", no_waste[0]["expectedDocumentFlags"])
+        self.assertFalse([line for line in no_waste[0]["lines"] if line["lineKind"] == "waste"])
+
+        gross_only = waste_lines("weighbridge_ticket", wb_mode="gross_only")[0]
+        self.assertNotIn("quantity", gross_only)
+        self.assertNotIn("quantityTonnes", gross_only)
+        self.assertIn("gross_weight_only", gross_only["expectedFlags"])
+
+        interim = waste_lines("hazardous_waste_consignment_note", hwcn_interim=True)[0]
+        self.assertNotIn("treatmentRoute", interim)
+        self.assertIn("interim_treatment", interim["expectedFlags"])
+
+    def test_waste_documents_follow_real_world_conventions(self) -> None:
+        import re
+
+        hwcn = json.loads(generate_json_ground_truth(self._waste_config("hazardous_waste_consignment_note")).decode("utf-8"))[0]
+        self.assertRegex(hwcn["documentNumber"], re.compile(r"^[A-Z0-9]{6}/[A-Z0-9]{5}$"))
+
+        invoice = json.loads(generate_json_ground_truth(
+            self._waste_config("waste_contractor_invoice", inv_excess_weight=True)).decode("utf-8"))[0]
+        bin_lines = [l for l in invoice["lines"] if l["lineKind"] == "waste" and l.get("containerType") == "bin"]
+        self.assertTrue(bin_lines)
+        self.assertTrue(all(l["quantityBasis"] == "lift_estimated" and l["quantityUnit"] == "lift" for l in bin_lines))
+        excess = [l for l in invoice["lines"] if l["description"].startswith("Excess weight")]
+        self.assertTrue(excess)
+        self.assertTrue(all(l["lineKind"] == "non_waste_charge" for l in excess))
+
+        stored = json.loads(generate_json_ground_truth(
+            self._waste_config("weighbridge_ticket", wb_mode="stored_tare")).decode("utf-8"))[0]["lines"][0]
+        self.assertEqual(stored["grossWeight"] - stored["tareWeight"], stored["netWeight"])
+
+    def test_waste_multi_document_export_as_zip(self) -> None:
+        raw_config = self._waste_config("waste_transfer_note")
+        raw_config["document"]["doc_count"] = 3
+        self.assertTrue(build_document_download_filename(raw_config, "PDF").endswith(".zip"))
+        with ZipFile(BytesIO(generate_document_bytes(raw_config, "PDF"))) as archive:
+            names = archive.namelist()
+            self.assertEqual(3, len(names))
+            for name in names:
+                self._assert_payload_shape(archive.read(name), "PDF")
+        documents = json.loads(generate_json_ground_truth(raw_config).decode("utf-8"))
+        self.assertEqual(3, len(documents))
 
     def test_stationary_ground_truth_is_non_empty_for_each_document_family(self) -> None:
         cases = [
@@ -393,6 +487,49 @@ class GeneratorContractTests(unittest.TestCase):
                             "monthly_distance_km": "2600",
                             "efficiency_l_per_100km": "9.8",
                             "odometer_start": "42000",
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def _waste_config(self, document_type: str, **options) -> dict:
+        return {
+            "_category": "waste_generated_in_operations",
+            "random_seed": 5,
+            "financial_period": {"label": "Q2 2026", "start_date": "2026-04-01", "end_date": "2026-06-30"},
+            "document_type": document_type,
+            "document": {
+                "language": "en",
+                "distractor_fields": {"enabled": False},
+                "vat_rate": 20,
+                "doc_count": 1,
+                "waste": options,
+            },
+            "companies": [
+                {
+                    "label": "Larkspur",
+                    "name": "Larkspur Manufacturing Ltd",
+                    "code": "LARK",
+                    "currency": "GBP (£)",
+                    "sic_code": "25620",
+                    "contractor": {
+                        "name": "Greenway Waste Services Ltd",
+                        "code": "GW",
+                        "carrier_reg": "CBDU204417",
+                        "address": ["2 Canal Wharf", "Leeds LS11 5QR"],
+                    },
+                    "sites": [
+                        {
+                            "label": "Kestrel Park",
+                            "address": ["Unit 4, Kestrel Park", "Leeds", "LS10 1AB", "United Kingdom"],
+                            "streams": [
+                                {"preset": "general_waste_1100", "lifts_per_month": 13},
+                                {"preset": "cd_skip_8", "lifts_per_month": 2},
+                                {"preset": "food_240", "lifts_per_month": 8},
+                                {"preset": "waste_oil_ibc", "lifts_per_month": 1},
+                                {"preset": "fluorescent_tubes", "lifts_per_month": 1},
+                            ],
                         }
                     ],
                 }

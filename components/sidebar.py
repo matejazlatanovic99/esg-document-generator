@@ -134,7 +134,7 @@ SCOPE_CONFIG: dict[str, dict] = {
             "Employee Commuting": "employee_commuting",
             "Upstream Leased Assets": "upstream_leased_assets",
         },
-        "implemented": set(),
+        "implemented": {"waste_generated_in_operations"},
     },
     "Scope 3: Downstream": {
         "categories": {

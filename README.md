@@ -19,7 +19,8 @@ A Streamlit web application for generating ESG (Environmental, Social, Governanc
 | Scope 1: Direct Emissions | Stationary Combustion | Implemented |
 | Scope 1: Direct Emissions | Mobile Combustion | Implemented |
 | Scope 1: Direct Emissions | Fugitive Emissions | Coming Soon |
-| Scope 3: Upstream | All categories (8) | Coming Soon |
+| Scope 3: Upstream | Waste in Operations (Category 5) | Implemented |
+| Scope 3: Upstream | Other categories (7) | Coming Soon |
 | Scope 3: Downstream | All categories (7) | Coming Soon |
 
 ### Mobile combustion document types
@@ -31,6 +32,22 @@ A Streamlit web application for generating ESG (Environmental, Social, Governanc
 | Vehicle Telematics | XLSX, CSV | Per-vehicle monthly fuel consumed, distance, idle fuel, engine hours |
 | MileageLog | XLSX, CSV | Trip-level log: trip start/end time, purpose, start/end location, distance, fuel type |
 | Odometer Report | XLSX, CSV | Start/end odometer and total distance per vehicle |
+
+### Waste in operations (Scope 3 Category 5) document types
+
+| Document type | Formats | Notes |
+|---|---|---|
+| Waste Transfer Note | PDF, DOCX | Official duty-of-care A–D layout; single transfer or season ticket (12-month estimate); multi-document ZIP |
+| Contractor Invoice / Credit Note | PDF, DOCX | Weighed, skip-volume or lift-only lines; rebate, landfill tax and non-waste charge lines; credit notes with negative quantities; multi-document ZIP |
+| Weighbridge Ticket | PDF, DOCX | Gross / tare / net in kg or t; gross-only and net-mismatch cases; multi-document ZIP |
+| Waste Report / Portal Export | PDF, XLSX, CSV | Tonnes per stream with route % split or primary route; optional multi-site and TOTAL row |
+| Hazardous Waste Consignment Note | PDF, DOCX | Parts A–E; Part E received quantity vs Part B estimate; interim R13/D15 operations; multi-document ZIP |
+| Skip / Waste Log | XLSX, CSV | Customer log with mixed units, volume-only skip rows, blank and TOTAL rows |
+
+Waste ground truth is one object per document (`documentType`, `documentRole`, `lines[]`
+with `lineKind`, `material`, `treatmentRoute`, `quantityTonnes`, `expectedFlags`, ...), plus
+`Scope` / `Category`. Volume and lift conversions use the Environment Agency density factor of
+the line's EWC code (`generators/waste_reference.py`).
 
 ### Multi-scope documents
 

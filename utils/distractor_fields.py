@@ -187,7 +187,17 @@ _FLEET_TABULAR_FIELDS: tuple[_Template, ...] = (
     _Template("haulier_code", "haulier_code", "merchant", ("HL-17", "HL-24", "HL-66"), position="after", row_scope="statement"),
 )
 
+_WASTE_TABULAR_FIELDS: tuple[_Template, ...] = (
+    _Template("haulier_code", "haulier_code", "ewc", ("HL-17", "HL-24", "HL-66"), position="after", row_scope="row"),
+    _Template("cost_centre", "cost_centre", "stream", ("CC-104", "CC-228", "CC-642"), position="before", row_scope="file"),
+    _Template("dispatch_ref", "dispatch_ref", "date", ("DSP-208", "DSP-331", "DSP-517"), position="after", row_scope="row"),
+)
+
+_WASTE_DOCUMENT_TYPES = ("waste_transfer_note", "waste_contractor_invoice", "weighbridge_ticket", "waste_report", "hazardous_waste_consignment_note")
+
 _CATALOG: dict[tuple[str, str, str], dict[str, tuple[_Template, ...]]] = {
+    **{("waste_generated_in_operations", _doc, _fmt): {"document": _LOGISTICS_DOCUMENT_FIELDS} for _doc in _WASTE_DOCUMENT_TYPES for _fmt in ("PDF", "DOCX")},
+    **{("waste_generated_in_operations", _doc, _fmt): {"tabular": _WASTE_TABULAR_FIELDS} for _doc in ("waste_report", "waste_spreadsheet") for _fmt in ("CSV", "XLSX")},
     ("heat", "utility_bill", "PDF"): {"document": _HEAT_DOCUMENT_FIELDS},
     ("heat", "utility_bill", "DOCX"): {"document": _HEAT_DOCUMENT_FIELDS},
     ("heat", "supplier_portal_data", "CSV"): {"tabular": _HEAT_TABULAR_FIELDS},

@@ -45,6 +45,7 @@ _CATEGORY_PARAM_MAP: dict[str, str] = {
     "fugitive":     "Fugitive Emissions",
     "goods":        "Purchased Goods & Services",
     "capital":      "Capital Goods",
+    "waste":        "Waste in Operations",
     "travel":       "Business Travel",
     "commuting":    "Employee Commuting",
 }
