@@ -1216,7 +1216,7 @@ def _build_waste_log(raw_config: dict) -> list[dict]:
         period_end=fp["end_date"],
         lines=lines,
         special_cases=_dedupe(specials) or ["clean_baseline"],
-        notes="Customer-maintained log; site comes from the title row / upload context. Overlaps contractor documents.",
+        notes="Customer-maintained log; organisation and site come from the header block above the table. Overlaps contractor documents.",
         _rows=rows,
         _title=f"{site.get('label') or 'Site'} – skip & waste collection log",
     )
@@ -1785,7 +1785,15 @@ def _tabular_spec(raw_config: dict, record: dict, output_format: str):
         base_ids = list(_LOG_FIELD_IDS)
         header_map = _LOG_HEADERS
         row_maps = [{**r, "date": r["date"].isoformat()} for r in record["_rows"]]
-        title_rows = [[record["_title"]]]
+        # Header block so the organisation and site can be parsed from the file itself.
+        title_rows = [
+            [record["_title"]],
+            ["Company", record["organisation"]],
+            ["Site", record["site_label"]],
+            ["Site address", record["site_address"]],
+            ["Period", f"{_fmt_date(record['period_start'])} – {_fmt_date(record['period_end'])}"],
+            [],
+        ]
     ordered = _augment_field_ids(_ordered_field_ids(plan, base_ids), distractor_plan)
     distractors = _distractor_field_map(distractor_plan)
     headers = [distractors[i].label if i in distractors else (plan.get("header_aliases", {}).get(i) or header_map[i]) for i in ordered]
@@ -1813,7 +1821,7 @@ def _render_xlsx(raw_config: dict, records: list[dict]) -> bytes:
     row = _write_xlsx_preamble(ws, 1, plan)
     for title in title_rows:
         for c, value in enumerate(title, start=1):
-            ws.cell(row=row, column=c, value=value).font = Font(bold=True)
+            ws.cell(row=row, column=c, value=value).font = Font(bold=(c == 1))
         row += 1
     header_row = row
     for c, value in enumerate(headers, start=1):

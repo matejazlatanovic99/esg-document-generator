@@ -297,6 +297,16 @@ class GeneratorContractTests(unittest.TestCase):
             self._waste_config("weighbridge_ticket", wb_mode="stored_tare")).decode("utf-8"))[0]["lines"][0]
         self.assertEqual(stored["grossWeight"] - stored["tareWeight"], stored["netWeight"])
 
+    def test_waste_log_header_block_names_company_and_site(self) -> None:
+        raw_config = self._waste_config("waste_spreadsheet")
+        text = generate_document_bytes(raw_config, "CSV").decode("utf-8")
+        self.assertIn("Company,Larkspur Manufacturing Ltd", text)
+        self.assertIn("Site,Kestrel Park", text)
+        self.assertIn("Unit 4, Kestrel Park", text)
+        document = json.loads(generate_json_ground_truth(raw_config).decode("utf-8"))[0]
+        self.assertEqual("Larkspur Manufacturing Ltd", document["organisationName"])
+        self.assertTrue(document["siteAddress"].startswith("Unit 4, Kestrel Park"))
+
     def test_waste_multi_document_export_as_zip(self) -> None:
         raw_config = self._waste_config("waste_transfer_note")
         raw_config["document"]["doc_count"] = 3
